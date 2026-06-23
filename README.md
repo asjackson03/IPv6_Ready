@@ -77,6 +77,19 @@ python main.py --target 192.168.1.0/24 --format both --verbose
 sudo python main.py --target 192.168.1.1,192.168.1.2
 ```
 
+**Rangos grandes** (p. ej. `/22`, ~1000 hosts): el timeout se calcula
+dinámicamente según el número de hosts estimados, pero en rangos así de
+grandes conviene usar `--fast` para evitar escaneos de varias horas:
+
+```bash
+sudo python main.py --target 10.0.0.0/22 --fast --verbose
+```
+
+> `--fast` usa `-sV --version-intensity 2` (sin `-O`), es decir, renuncia a
+> la detección de sistema operativo —lo más lento del escaneo— a cambio de
+> terminar mucho antes. Trade-off: menos timeout/duración, menos detalle
+> (sin SO) en el inventario resultante.
+
 Opciones principales:
 
 | Argumento    | Descripción                                         | Por defecto |
@@ -86,6 +99,7 @@ Opciones principales:
 | `--output`   | Directorio de salida.                               | `data/raw/` |
 | `--format`   | `json`, `csv` o `both`.                             | `both`      |
 | `--verbose`  | Salida detallada.                                   | desactivado |
+| `--fast`     | Escaneo ligero sin `-O`, recomendado para `/22`+.   | desactivado |
 
 Los resultados se guardan como
 `data/raw/ipv6_scan_YYYYMMDD_HHMMSS.json` / `.csv`.

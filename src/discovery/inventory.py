@@ -19,7 +19,7 @@ colorama_init(autoreset=True)
 # Orden preferido de columnas en el inventario.
 COLUMN_ORDER = [
     "ip", "mac", "hostname", "device_type", "vendor",
-    "os_detected", "os_version", "ipv6_address",
+    "os_detected", "os_version", "os_detection_method", "ipv6_address",
     "ipv6_score", "ipv6_status", "recomendacion_basica",
     "open_ports", "ttl", "snmp_available", "firmware_version",
     "source", "evaluated_at",
@@ -31,6 +31,21 @@ STATUS_COLORS = {
     "PARCIAL": Fore.CYAN,
     "REQUIERE_UPGRADE": Fore.YELLOW,
     "INCOMPATIBLE": Fore.RED,
+}
+
+# Color asociado a cada método de detección de SO (confianza del dato).
+# colorama no tiene "naranja" nativo (solo los 8 colores ANSI básicos +
+# variantes LIGHT*), así que 'ambiguo' usa MAGENTA para distinguirlo
+# claramente de 'ninguno' (RED): "ambiguo" significa que SÍ hubo matches de
+# nmap, pero contradictorios entre sí (ver OSMATCH_ACCURACY_MARGIN en
+# scanner.py) — una señal de baja confianza distinta a la ausencia total de
+# datos.
+OS_DETECTION_COLORS = {
+    "fingerprint": Fore.GREEN,
+    "fingerprint_generico": Fore.CYAN,
+    "service_info": Fore.YELLOW,
+    "ambiguo": Fore.MAGENTA,
+    "ninguno": Fore.RED,
 }
 
 
@@ -168,6 +183,97 @@ class InventoryManager:
         if saved_paths:
             for path in saved_paths:
                 print(f"{Fore.GREEN}Reporte guardado en:{Style.RESET_ALL} {path}")
+        print(f"{Style.BRIGHT}{'=' * 60}{Style.RESET_ALL}")
+
+    def print_quality_summary(self, df: pd.DataFrame) -> None:
+        """Imprime un resumen de la confiabilidad de los datos detectados.
+
+        Muestra cuántos dispositivos quedaron con vendor/hostname
+        desconocidos, la distribución por ``os_detection_method`` y la
+        lista de IPs cuyo SO no se determinó con fingerprint confiable
+        (``service_info``, ``ambiguo`` o ``ninguno``), candidatas a
+        revisión manual.
+
+        Args:
+            df: inventario a resumir.
+        """
+        print()
+        print(f"{Style.BRIGHT}{'=' * 60}")
+        print(f"{Style.BRIGHT}  CALIDAD DE IDENTIFICACIÓN")
+        print(f"{Style.BRIGHT}{'=' * 60}{Style.RESET_ALL}")
+
+        if df.empty:
+            print(f"{Fore.YELLOW}No hay dispositivos para resumir.{Style.RESET_ALL}")
+            return
+
+        total = len(df)
+
+        # --- Vendor / hostname desconocidos -------------------------------
+        vendor_desconocido = int((df.get("vendor") == "desconocido").sum())
+        hostname_desconocido = int((df.get("hostname") == "desconocido").sum())
+        print()
+        print(tabulate(
+            [
+                ["Vendor desconocido", vendor_desconocido,
+                 f"{(vendor_desconocido / total) * 100:.1f}%"],
+                ["Hostname desconocido", hostname_desconocido,
+                 f"{(hostname_desconocido / total) * 100:.1f}%"],
+            ],
+            headers=["Dato", "Dispositivos", "% del total"],
+            tablefmt="rounded_outline",
+        ))
+
+        # --- Distribución por método de detección de SO -------------------
+        metodo_col = df["os_detection_method"] if "os_detection_method" in df.columns \
+            else pd.Series(["ninguno"] * total)
+        counts = metodo_col.value_counts()
+        method_rows = []
+        for metodo in ["fingerprint", "fingerprint_generico", "service_info", "ambiguo", "ninguno"]:
+            cantidad = int(counts.get(metodo, 0))
+            pct = (cantidad / total) * 100 if total else 0
+            color = OS_DETECTION_COLORS.get(metodo, "")
+            method_rows.append([
+                f"{color}{metodo}{Style.RESET_ALL}",
+                cantidad,
+                f"{pct:.1f}%",
+            ])
+        print()
+        print(f"{Style.BRIGHT}Distribución por método de detección de SO:{Style.RESET_ALL}")
+        print(tabulate(
+            method_rows,
+            headers=["Método", "Dispositivos", "% del total"],
+            tablefmt="rounded_outline",
+        ))
+
+        # --- Dispositivos a revisar manualmente ----------------------------
+        # 'ambiguo' se incluye junto a 'service_info'/'ninguno': aunque hubo
+        # matches de nmap, eran contradictorios entre sí, así que el SO
+        # tampoco quedó determinado de forma confiable (ver scanner.py).
+        revisar = df[metodo_col.isin(["service_info", "ambiguo", "ninguno"])]
+        print()
+        print(f"{Style.BRIGHT}Dispositivos a revisar manualmente "
+              f"(SO sin fingerprint confiable):{Style.RESET_ALL}")
+        if revisar.empty:
+            print(f"{Fore.GREEN}Ninguno: todos los dispositivos tienen SO "
+                  f"detectado por fingerprint.{Style.RESET_ALL}")
+        else:
+            revisar_rows = [
+                [
+                    row["ip"],
+                    row["hostname"],
+                    row["vendor"],
+                    f"{OS_DETECTION_COLORS.get(row['os_detection_method'], '')}"
+                    f"{row['os_detection_method']}{Style.RESET_ALL}",
+                ]
+                for _, row in revisar.iterrows()
+            ]
+            print(tabulate(
+                revisar_rows,
+                headers=["IP", "Hostname", "Vendor", "Método detección SO"],
+                tablefmt="rounded_outline",
+            ))
+
+        print()
         print(f"{Style.BRIGHT}{'=' * 60}{Style.RESET_ALL}")
 
     @staticmethod

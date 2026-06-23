@@ -83,6 +83,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Muestra información detallada durante la ejecución.",
     )
+    parser.add_argument(
+        "--fast",
+        action="store_true",
+        help=(
+            "Usa argumentos nmap más ligeros ('-sV --version-intensity 2', "
+            "sin -O) para acelerar el escaneo en redes grandes. Sacrifica la "
+            "detección de sistema operativo a cambio de velocidad. "
+            "Recomendado para rangos /22 o mayores."
+        ),
+    )
     return parser
 
 
@@ -101,6 +111,7 @@ def run(args: argparse.Namespace) -> int:
     scanner = NetworkScanner(
         timeout=int(os.getenv("SCAN_TIMEOUT", "30")),
         verbose=args.verbose,
+        fast=args.fast,
     )
     checker = IPv6Checker()
     inventory = InventoryManager()
@@ -143,6 +154,7 @@ def run(args: argparse.Namespace) -> int:
 
     # 5) Resumen en consola ---------------------------------------------------
     inventory.print_summary(df, saved_paths=saved_paths)
+    inventory.print_quality_summary(df)
 
     return 0
 

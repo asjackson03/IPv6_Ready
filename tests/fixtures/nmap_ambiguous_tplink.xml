@@ -1,0 +1,63 @@
+<?xml version="1.0"?>
+<nmaprun scanner="nmap" args="nmap -sV -O --version-intensity 5 -n 192.168.68.1"
+ start="0" startstr="x" version="7.94" xmloutputversion="1.05">
+<scaninfo type="syn" protocol="tcp" numservices="1000" services="53,80,443,1900"/>
+<host starttime="0" endtime="0">
+<status state="up" reason="arp-response" reason_ttl="0"/>
+<address addr="192.168.68.1" addrtype="ipv4"/>
+<address addr="B8:FB:B3:CA:68:49" addrtype="mac" vendor="TP-Link Systems"/>
+<hostnames><hostname name="" type=""/></hostnames>
+<ports>
+<port protocol="tcp" portid="53">
+<state state="open" reason="syn-ack" reason_ttl="0"/>
+<service name="domain" method="probed" conf="10"/>
+</port>
+<port protocol="tcp" portid="80">
+<state state="open" reason="syn-ack" reason_ttl="0"/>
+<service name="http" product="OpenWrt admin httpd" method="probed" conf="10"/>
+</port>
+<port protocol="tcp" portid="443">
+<state state="open" reason="syn-ack" reason_ttl="0"/>
+<service name="https" method="probed" conf="8"/>
+</port>
+<port protocol="tcp" portid="1900">
+<state state="open" reason="syn-ack" reason_ttl="0"/>
+<service name="upnp" method="probed" conf="5"/>
+</port>
+</ports>
+<os>
+<osmatch name="Sony Blu-Ray Player" accuracy="88" line="1">
+<osclass type="media device" vendor="Sony" osfamily="embedded" osgen="" accuracy="88"/>
+</osmatch>
+<osmatch name="Linux 5.10 - 5.15" accuracy="87" line="2">
+<osclass type="general purpose" vendor="Linux" osfamily="Linux" osgen="5.X" accuracy="87"/>
+</osmatch>
+<osmatch name="MikroTik RouterOS 7.2" accuracy="86" line="3">
+<osclass type="WAP" vendor="MikroTik" osfamily="RouterOS" osgen="7.X" accuracy="86"/>
+</osmatch>
+<osmatch name="Linux 2.6.18" accuracy="86" line="4">
+<osclass type="general purpose" vendor="Linux" osfamily="Linux" osgen="2.6.X" accuracy="86"/>
+</osmatch>
+<osmatch name="Linux 5.15" accuracy="86" line="5">
+<osclass type="general purpose" vendor="Linux" osfamily="Linux" osgen="5.X" accuracy="86"/>
+</osmatch>
+<osmatch name="Linux 5.4" accuracy="86" line="6">
+<osclass type="general purpose" vendor="Linux" osfamily="Linux" osgen="5.X" accuracy="86"/>
+</osmatch>
+<osmatch name="Linux 6.12" accuracy="86" line="7">
+<osclass type="general purpose" vendor="Linux" osfamily="Linux" osgen="6.X" accuracy="86"/>
+</osmatch>
+<osmatch name="Sonos ZonePlayer S1 or S3 audio system" accuracy="85" line="8">
+<osclass type="media device" vendor="Sonos" osfamily="embedded" osgen="" accuracy="85"/>
+</osmatch>
+<osmatch name="Linux 2.6.16 (fli4l 3.1.1)" accuracy="85" line="9">
+<osclass type="general purpose" vendor="Linux" osfamily="Linux" osgen="2.6.X" accuracy="85"/>
+</osmatch>
+<osmatch name="Dish Network Hopper DVR" accuracy="85" line="10">
+<osclass type="media device" vendor="Dish Network" osfamily="embedded" osgen="" accuracy="85"/>
+</osmatch>
+</os>
+</host>
+<runstats><finished time="0" timestr="x" elapsed="0" summary="x" exit="success"/>
+<hosts up="1" down="0" total="1"/></runstats>
+</nmaprun>
