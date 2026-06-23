@@ -304,3 +304,46 @@ en scanner.py también necesita revisión — varios endpoints reales
 terminaron clasificados como device_type="iot" en vez de "equipo final",
 lo cual rompería la lógica de criticidad si se implementara hoy sobre la
 inferencia actual sin corregirla primero.
+
+## Clarificación de arquitectura: Módulo 3 tiene 3 sub-componentes, no es solo "LLM genera roadmap"
+
+Disparado por pregunta de Andrés: ¿cómo sabe la herramienta que un firewall
+es la capa 3 real de la red (vs un switch core), si eso no es visible solo
+con discovery de red (Nmap)? Respuesta: NO es parte del Módulo 2 (ML), que
+solo trabaja con características de dispositivo individual (OS, puertos,
+vendor) — el Módulo 2 nunca puede inferir topología/rol lógico de la red,
+porque esa información no está en los datos que ve por dispositivo aislado.
+
+Esto pertenece al Módulo 3, que en realidad tiene tres sub-componentes:
+
+  3a. PARSER DE CONFIGURACIÓN (preferido por Andrés sobre solo cuestionario)
+      El administrador sube el archivo de configuración real del equipo
+      (show run de firewall/switch/router). Se parsea para extraer:
+      - Topología real declarada (interfaces, rutas, VLANs)
+      - Si tiene IPv6 configurado y cómo
+      - Cuál es el rol lógico real (capa 3, generador de RA, etc.)
+      Esto resuelve de raíz la ambigüedad de fingerprinting por red que
+      causó el caso real "Sony Blu-Ray Player" — el archivo de config
+      declara la verdad explícitamente, no hay que inferirla por paquetes.
+      Conecta directamente con el proceso manual real que Andrés ya hace
+      en campo (pedir show run + armar topología con traceroute).
+      Meta explícita de Andrés: la IA local debe ser capaz de estructurar
+      la topología de la red TAL COMO ESTÁ en este momento, a partir de
+      estos archivos de configuración.
+
+  3b. CHAT LLM CONVERSACIONAL
+      Para todo lo que el archivo de configuración NO puede revelar:
+      cuántos ISPs tiene el cliente, tipo de servicio IPoE/PPPoE si es ISP,
+      criticidad de negocio de cada segmento, sedes, aplicaciones (ya
+      documentado en el brainstorm de BD/portal). Complementa a 3a, no lo
+      reemplaza.
+
+  3c. GENERADOR DE ROADMAP
+      Combina Módulo 1 (discovery) + Módulo 2 (clasificación ML) +
+      3a (topología real) + 3b (contexto conversacional) para producir
+      el plan de migración final. Este es el único sub-componente que
+      coincide con la idea original simple de "LLM genera roadmap".
+
+Orden de construcción: Módulo 2 (ML) se completa PRIMERO (ya en curso).
+Módulo 3 completo (3a+3b+3c) se aborda DESPUÉS, no antes. 3a tiene prioridad
+sobre 3b dentro del Módulo 3, por preferencia explícita de Andrés.
