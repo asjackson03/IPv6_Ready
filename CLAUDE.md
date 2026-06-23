@@ -267,3 +267,40 @@ Recalibración de timeout con datos reales de campo:
 Siempre verificar PRIMERO si el comando se ejecutó con sudo antes de
 sospechar un bug de código cuando aparezcan campos "desconocido" en
 vendor/hostname/OS.
+
+## Criticidad por categoría (para implementar en fase de Base de Datos, NO ahora)
+
+Disparado por: comportamiento intermitente de fingerprinting en endpoint
+Windows real (.50) — un mismo dispositivo activo y conectado mostró Windows
+11 identificado en una corrida y "desconocido" en otra, sin cambios de
+firewall confirmados. Probable causa: no-determinismo de la pila TCP/IP de
+Windows 10/11 ante probes repetidos de nmap (mitigaciones de randomización +
+throttling ICMP/TCP), no un bug de nuestro código. Aceptado como limitación
+conocida a documentar en el TFM, NO se va a perseguir un fix para esto.
+
+Conclusión de arquitectura: no todos los dispositivos pesan igual en el
+diagnóstico. La sección "Calidad de identificación" del CLI hoy trata todo
+como lista plana — un endpoint sin identificar aparece con el mismo peso
+visual que un firewall sin identificar. Esto es incorrecto y hay que
+corregirlo, pero en la fase de Base de Datos (cuando se formalicen las 7
+categorías del Excel de Andrés), no ahora en el CLI.
+
+Criticidad definida (ajustada por Andrés, no es la primera propuesta):
+  ALTA:
+    - segmentos_de_red
+    - servidores
+    - equipos_red_seguridad (router, switch, firewall)
+  BAJA:
+    - perifericos (impresoras, cámaras)
+    - equipos_finales (endpoints de usuario, DHCP, alta rotación)
+
+Cuando se construya la BD: el resumen de calidad de identificación debe
+poder filtrar/agrupar por criticidad, mostrando algo como "3 dispositivos
+sin identificar — 0 son críticos (servidores/red), 3 son equipos finales
+de baja prioridad" en vez de una lista plana sin jerarquía.
+
+Nota técnica pendiente de revisar en esa misma fase: _infer_device_type()
+en scanner.py también necesita revisión — varios endpoints reales
+terminaron clasificados como device_type="iot" en vez de "equipo final",
+lo cual rompería la lógica de criticidad si se implementara hoy sobre la
+inferencia actual sin corregirla primero.
