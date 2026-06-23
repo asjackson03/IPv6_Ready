@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 
 from src import __version__
 from src.discovery import NetworkScanner, IPv6Checker, InventoryManager
+from src.classifier import ModelTrainer, DeviceClassifier
 
 colorama_init(autoreset=True)
 
@@ -29,9 +30,23 @@ MOCK_DATA_PATH = os.path.join(
     "data", "sample", "mock_devices.json",
 )
 
+# Ruta por defecto al dataset de entrenamiento del Módulo 2.
+TRAINING_DATA_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "data", "sample", "training_dataset.json",
+)
 
-def print_banner() -> None:
-    """Imprime el banner de inicio del proyecto."""
+
+def print_banner(classify: bool = False) -> None:
+    """Imprime el banner de inicio del proyecto.
+
+    Args:
+        classify: si es True, indica que el Módulo 2 (clasificación ML)
+            está activo en esta ejecución.
+    """
+    modulos = "Módulo 1: Discovery"
+    if classify:
+        modulos += "  +  Módulo 2: Classifier ML"
     banner = f"""{Fore.CYAN}{Style.BRIGHT}
  ___ ____            __     ____                _
 |_ _|  _ \\__   __    / /_   |  _ \\ ___  __ _  __| |_   _
@@ -41,7 +56,7 @@ def print_banner() -> None:
                                                    |___/
         A N A L Y Z E R   ·   IPv6 Ready Analyzer
 {Style.RESET_ALL}{Fore.WHITE}  Prototipo de diagnóstico automatizado de compatibilidad IPv6
-  Versión {__version__}  ·  Módulo 1: Discovery{Style.RESET_ALL}
+  Versión {__version__}  ·  {modulos}{Style.RESET_ALL}
 """
     print(banner)
 
@@ -91,6 +106,24 @@ def build_parser() -> argparse.ArgumentParser:
             "sin -O) para acelerar el escaneo en redes grandes. Sacrifica la "
             "detección de sistema operativo a cambio de velocidad. "
             "Recomendado para rangos /22 o mayores."
+        ),
+    )
+    parser.add_argument(
+        "--train",
+        action="store_true",
+        help=(
+            "Entrena el clasificador ML (Módulo 2) con el dataset de "
+            "entrenamiento antes de clasificar. Guarda el modelo y un "
+            "reporte de entrenamiento en data/processed/."
+        ),
+    )
+    parser.add_argument(
+        "--classify",
+        action="store_true",
+        help=(
+            "Activa el Módulo 2: clasifica cada dispositivo en LISTO/"
+            "ACTUALIZABLE/REEMPLAZAR/EVALUAR con el modelo ML. Requiere un "
+            "modelo entrenado (usa --train si aún no existe)."
         ),
     )
     return parser
@@ -146,15 +179,36 @@ def run(args: argparse.Namespace) -> int:
 
     evaluated = [checker.evaluate_device(dev) for dev in iterator]
 
-    # 3) Construir inventario -------------------------------------------------
+    # 3) Entrenar el modelo ML si se solicita (Módulo 2) ----------------------
+    if args.train:
+        print(f"{Fore.CYAN}[MÓDULO 2]{Style.RESET_ALL} Entrenando clasificador ML "
+              f"con '{TRAINING_DATA_PATH}'...")
+        trainer = ModelTrainer()
+        metrics = trainer.train(TRAINING_DATA_PATH)
+        report_path = os.path.join(trainer.model_dir, "training_report.txt")
+        trainer.generate_training_report(metrics, output_path=report_path)
+        print(f"{Fore.GREEN}[OK]{Style.RESET_ALL} Modelo entrenado. "
+              f"Accuracy en test: {metrics['accuracy'] * 100:.1f}%")
+        print(f"{Fore.GREEN}[OK]{Style.RESET_ALL} Reporte de entrenamiento: "
+              f"{report_path}")
+
+    # 4) Clasificar con el Módulo 2 si se solicita ----------------------------
+    if args.classify:
+        print(f"{Fore.CYAN}[MÓDULO 2]{Style.RESET_ALL} Clasificando dispositivos...")
+        classifier = DeviceClassifier()
+        evaluated = classifier.classify_batch(evaluated)
+
+    # 5) Construir inventario -------------------------------------------------
     df = inventory.build_inventory(evaluated)
 
-    # 4) Guardar resultados ---------------------------------------------------
+    # 6) Guardar resultados ---------------------------------------------------
     saved_paths = inventory.save_results(df, output_dir, formats=formats)
 
-    # 5) Resumen en consola ---------------------------------------------------
+    # 7) Resumen en consola ---------------------------------------------------
     inventory.print_summary(df, saved_paths=saved_paths)
     inventory.print_quality_summary(df)
+    if args.classify:
+        inventory.print_ml_summary(df)
 
     return 0
 
@@ -164,7 +218,7 @@ def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
 
-    print_banner()
+    print_banner(classify=args.classify)
 
     try:
         return run(args)

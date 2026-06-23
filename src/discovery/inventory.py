@@ -21,6 +21,7 @@ COLUMN_ORDER = [
     "ip", "mac", "hostname", "device_type", "vendor",
     "os_detected", "os_version", "os_detection_method", "ipv6_address",
     "ipv6_score", "ipv6_status", "recomendacion_basica",
+    "ml_classification", "ml_confidence", "priority_score", "ml_probabilities",
     "open_ports", "ttl", "snmp_available", "firmware_version",
     "source", "evaluated_at",
 ]
@@ -46,6 +47,14 @@ OS_DETECTION_COLORS = {
     "service_info": Fore.YELLOW,
     "ambiguo": Fore.MAGENTA,
     "ninguno": Fore.RED,
+}
+
+# Color asociado a cada clase ML del Módulo 2 (madurez de migración IPv6).
+ML_CLASSIFICATION_COLORS = {
+    "LISTO": Fore.GREEN,
+    "ACTUALIZABLE": Fore.YELLOW,
+    "EVALUAR": Fore.CYAN,
+    "REEMPLAZAR": Fore.RED,
 }
 
 
@@ -272,6 +281,86 @@ class InventoryManager:
                 headers=["IP", "Hostname", "Vendor", "Método detección SO"],
                 tablefmt="rounded_outline",
             ))
+
+        print()
+        print(f"{Style.BRIGHT}{'=' * 60}{Style.RESET_ALL}")
+
+    def print_ml_summary(self, df: pd.DataFrame) -> None:
+        """Imprime el resumen del Módulo 2 (clasificación ML).
+
+        Muestra la distribución por ``ml_classification`` (cantidad, % y
+        confianza promedio de cada clase) y una sección de dispositivos
+        prioritarios: los 5 de menor ``priority_score`` (lo más urgente de
+        atender en la migración), con su recomendación heredada del Módulo 1.
+
+        Args:
+            df: inventario ya enriquecido con columnas ML.
+        """
+        if "ml_classification" not in df.columns:
+            return
+
+        print()
+        print(f"{Style.BRIGHT}{'=' * 60}")
+        print(f"{Style.BRIGHT}  CLASIFICACIÓN ML (MÓDULO 2)")
+        print(f"{Style.BRIGHT}{'=' * 60}{Style.RESET_ALL}")
+
+        if df.empty:
+            print(f"{Fore.YELLOW}No hay dispositivos para clasificar.{Style.RESET_ALL}")
+            return
+
+        total = len(df)
+
+        # --- Distribución por clase ML (cantidad, %, confianza media) -----
+        counts = df["ml_classification"].value_counts()
+        class_rows = []
+        for cls in ["LISTO", "ACTUALIZABLE", "EVALUAR", "REEMPLAZAR"]:
+            cantidad = int(counts.get(cls, 0))
+            pct = (cantidad / total) * 100 if total else 0
+            if cantidad:
+                conf_media = df.loc[
+                    df["ml_classification"] == cls, "ml_confidence"
+                ].mean()
+                conf_txt = f"{conf_media * 100:.1f}%"
+            else:
+                conf_txt = "-"
+            color = ML_CLASSIFICATION_COLORS.get(cls, "")
+            class_rows.append([
+                f"{color}{cls}{Style.RESET_ALL}",
+                cantidad,
+                f"{pct:.1f}%",
+                conf_txt,
+            ])
+        print()
+        print(f"{Style.BRIGHT}Distribución por clasificación ML:{Style.RESET_ALL}")
+        print(tabulate(
+            class_rows,
+            headers=["Clasificación", "Dispositivos", "% del total", "Confianza media"],
+            tablefmt="rounded_outline",
+        ))
+
+        # --- Dispositivos prioritarios (priority_score más bajo) ----------
+        prioritarios = df.sort_values(
+            ["priority_score", "ipv6_score"], ascending=[True, True]
+        ).head(5)
+        prio_rows = [
+            [
+                row["ip"],
+                row["hostname"],
+                f"{ML_CLASSIFICATION_COLORS.get(row['ml_classification'], '')}"
+                f"{row['ml_classification']}{Style.RESET_ALL}",
+                f"{row['ml_confidence'] * 100:.1f}%",
+                row.get("recomendacion_basica", ""),
+            ]
+            for _, row in prioritarios.iterrows()
+        ]
+        print()
+        print(f"{Style.BRIGHT}DISPOSITIVOS PRIORITARIOS "
+              f"(mayor urgencia de migración):{Style.RESET_ALL}")
+        print(tabulate(
+            prio_rows,
+            headers=["IP", "Hostname", "Clasificación", "Confianza", "Recomendación (M1)"],
+            tablefmt="rounded_outline",
+        ))
 
         print()
         print(f"{Style.BRIGHT}{'=' * 60}{Style.RESET_ALL}")

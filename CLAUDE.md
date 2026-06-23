@@ -79,7 +79,17 @@ sus propios administradores creen.
 - 🔄 Fix en curso: timeout dinámico en `scanner.py` para que escaneos de rangos
   grandes (/22, /16) no fallen por `PortScannerError: Timeout from nmap process`.
   Incluye flag `--fast` para desactivar `-O` en redes grandes.
-- 🔄 Módulo 2 (Classifier ML): prompt preparado, pendiente de ejecutar.
+- ✅ Módulo 2 (Classifier ML) implementado y validado. RandomForest
+  (scikit-learn 1.4.0) sobre `src/classifier/` (FeatureExtractor de 11 features,
+  ModelTrainer, DeviceClassifier). Dataset `data/sample/training_dataset.json`
+  (50 dispositivos, 14 LISTO / 18 ACTUALIZABLE / 12 REEMPLAZAR / 6 EVALUAR).
+  Flags `--train` y `--classify` en `main.py`; resumen ML en consola y reporte
+  académico en `data/processed/training_report.txt`. 18 tests en verde (13+5).
+  Feature de confianza `os_confidence_score` (deriva de `os_detection_method`)
+  quedó 7º de 11 en importancia con el dataset sintético — señal redundante
+  aquí, hallazgo a documentar en la memoria. `ipv6_score_normalized` quedó en
+  0.000 (redundante con `has_ipv6`), también citable como limitación del
+  dataset sintético, no bug.
 - 📌 TFM (documento Word): Capítulos 1, 2 y 5 redactados con la voz personal de
   Andrés (no tono genérico de paper). Estado del arte compara explícitamente
   contra Nmap, NDisc6, v6disc, SolarWinds, test-ipv6.com — posicionando el

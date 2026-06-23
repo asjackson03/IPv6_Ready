@@ -9,10 +9,12 @@ import pandas as pd
 import pytest
 
 from src.discovery import NetworkScanner, IPv6Checker, InventoryManager
+from src.classifier import FeatureExtractor, ModelTrainer, DeviceClassifier
 
 # Ruta al JSON de datos simulados (relativa a la raíz del proyecto).
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MOCK_PATH = os.path.join(PROJECT_ROOT, "data", "sample", "mock_devices.json")
+TRAINING_PATH = os.path.join(PROJECT_ROOT, "data", "sample", "training_dataset.json")
 FIXTURES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
 NO_OSMATCH_FIXTURE = os.path.join(FIXTURES_DIR, "nmap_no_osmatch.xml")
 AMBIGUOUS_OSMATCH_FIXTURE = os.path.join(FIXTURES_DIR, "nmap_ambiguous_tplink.xml")
@@ -418,3 +420,102 @@ def test_print_quality_summary_no_crash():
     ])
 
     InventoryManager().print_quality_summary(df)
+
+
+# --------------------------------------------------------------------------- #
+#  Módulo 2 — Classifier ML
+# --------------------------------------------------------------------------- #
+def _mock_device(**overrides):
+    """Dispositivo mínimo con campos del Módulo 1, sobrescribible en tests."""
+    base = {
+        "ip": "10.0.0.1",
+        "hostname": "host-test",
+        "os_detected": "Ubuntu Linux",
+        "os_version": "22.04 LTS",
+        "device_type": "server",
+        "vendor": "Dell",
+        "open_ports": [22, 443],
+        "ipv6_address": "2001:db8::1",
+        "ttl": 64,
+        "snmp_available": True,
+        "firmware_version": None,
+        "ipv6_score": 70,
+        "os_detection_method": "fingerprint",
+    }
+    base.update(overrides)
+    return base
+
+
+def test_feature_extraction_shape():
+    """extract_features devuelve exactamente 11 floats en rango razonable."""
+    extractor = FeatureExtractor()
+    features = extractor.extract_features(_mock_device())
+
+    assert features.shape == (11,)
+    assert len(extractor.get_feature_names()) == 11
+    # Todas las features de este proyecto están acotadas a [0, 5].
+    assert all(0.0 <= float(v) <= 5.0 for v in features)
+
+
+def test_feature_extraction_batch():
+    """extract_batch sobre 3 dispositivos devuelve una matriz (3, 11)."""
+    extractor = FeatureExtractor()
+    devices = [
+        _mock_device(ip="10.0.0.1"),
+        _mock_device(ip="10.0.0.2", device_type="router"),
+        _mock_device(ip="10.0.0.3", os_detection_method="ninguno"),
+    ]
+    matrix = extractor.extract_batch(devices)
+
+    assert matrix.shape == (3, 11)
+
+
+def test_os_confidence_score_mapping():
+    """os_confidence_score: 'ambiguo' produce valor bajo; 'fingerprint' alto."""
+    extractor = FeatureExtractor()
+    idx = extractor.get_feature_names().index("os_confidence_score")
+
+    ambiguo = extractor.extract_features(_mock_device(os_detection_method="ambiguo"))
+    fingerprint = extractor.extract_features(
+        _mock_device(os_detection_method="fingerprint")
+    )
+
+    assert ambiguo[idx] <= 0.3
+    assert fingerprint[idx] == 1.0
+
+
+def test_train_and_classify_roundtrip(tmp_path):
+    """Entrena con el dataset real y clasifica un dispositivo de mock_devices."""
+    pytest.importorskip("sklearn")
+    model_dir = str(tmp_path / "model")
+
+    trainer = ModelTrainer(model_dir=model_dir)
+    metrics = trainer.train(TRAINING_PATH)
+    assert 0.0 <= metrics["accuracy"] <= 1.0
+    assert metrics["train_size"] + metrics["test_size"] == 50
+
+    device = NetworkScanner().load_mock_data(MOCK_PATH)[0]
+    classifier = DeviceClassifier(model_dir=model_dir)
+    result = classifier.classify_device(device)
+
+    assert result["ml_classification"] in {
+        "LISTO", "ACTUALIZABLE", "REEMPLAZAR", "EVALUAR"
+    }
+    assert 0.0 <= result["ml_confidence"] <= 1.0
+    assert set(result["ml_probabilities"].keys()) == {
+        "LISTO", "ACTUALIZABLE", "REEMPLAZAR", "EVALUAR"
+    }
+
+
+def test_classify_batch_ordering(tmp_path):
+    """classify_batch ordena por priority_score ascendente (lo urgente arriba)."""
+    pytest.importorskip("sklearn")
+    model_dir = str(tmp_path / "model")
+    ModelTrainer(model_dir=model_dir).train(TRAINING_PATH)
+
+    devices = NetworkScanner().load_mock_data(MOCK_PATH)
+    classifier = DeviceClassifier(model_dir=model_dir)
+    ordered = classifier.classify_batch(devices)
+
+    priorities = [d["priority_score"] for d in ordered]
+    assert priorities == sorted(priorities)
