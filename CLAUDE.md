@@ -95,3 +95,101 @@ sus propios administradores creen.
 - No tocar `mock_devices.json` (los 10 dispositivos ya están documentados tal
   cual en el TFM, capítulo 5). Si se necesita más data, crear un archivo nuevo
   (ej. `training_dataset.json`), no modificar el existente.
+## Brainstorm: Arquitectura de persistencia y portal web (sesión post-Módulo 1)
+
+Esta sección documenta decisiones de arquitectura para las fases 4 y 5 del
+proyecto (base de datos y portal web), que vienen DESPUÉS de completar el
+Módulo 2 (Classifier ML). No implementar nada de esto hasta que el Módulo 2
+esté completo y validado.
+
+### Por qué hace falta una base de datos
+
+Hoy el Módulo 1 escribe a archivos planos (`data/raw/*.json`, `*.csv`). Esto
+es correcto para el TFM (evidencia reproducible, fácil de anexar), pero no
+permite dos cosas que sí son objetivos del proyecto:
+1. Historial de escaneos para medir progreso de migración en el tiempo
+   (ej. "cuántos dispositivos pasaron de INCOMPATIBLE a COMPATIBLE en 3 meses").
+2. Alimentar un portal web sin acoplar el frontend directamente al filesystem.
+
+### Esquema de datos — basado en el inventario manual real de Andrés
+
+Andrés ya tiene un proceso de campo validado: un Excel con hojas separadas
+por categoría que usa en la Fase 1 de sus proyectos reales. La base de datos
+debe reflejar esas categorías, no inventar una taxonomía nueva:
+
+- `segmentos_de_red`   — descubrible automáticamente (Nmap / Módulo 1)
+- `servidores`         — descubrible automáticamente (Módulo 1)
+- `equipos_red_seguridad` — descubrible automáticamente (routers, switches, firewalls)
+- `equipos_finales`    — descubrible automáticamente (Módulo 1)
+- `perifericos`        — descubrible automáticamente (Módulo 1, ya en mock_devices.json)
+- `sedes`              — NO descubrible por red. Requiere declaración humana.
+- `aplicaciones`       — NO descubrible por red. Requiere declaración humana.
+
+Esta división (automático vs declarado) es la base de diseño del chat LLM:
+el chat no es solo para generar la hoja de ruta final, es el mecanismo para
+CAPTURAR sedes y aplicaciones en tiempo real durante la conversación con el
+administrador de red, alimentando la base de datos directamente. Esto conecta
+con el "árbol de preguntas" de levantamiento que ya se diseñó conceptualmente
+(perfil cliente final vs ISP, preguntas sobre BGP/prefijos/RA).
+
+Tablas mínimas conceptuales para soportar historial:
+- `devices` (identidad persistente del equipo, no solo IP que puede cambiar)
+- `scans` (cada ejecución: timestamp, target, modo --demo/--fast/etc.)
+- `device_snapshots` (estado de un device en un scan específico: score, status)
+- `sedes`, `aplicaciones` (declaradas vía chat)
+- `conversaciones_chat` (historial de la interacción LLM con el administrador)
+
+### Decisión tecnológica: SQLite, no Postgres (por ahora)
+
+SQLite por ser archivo único, sin servidor separado, incluido en Python
+estándar (`sqlite3`), suficiente para el volumen de un diagnóstico puntual
+(no es un sistema de tráfico en tiempo real). Usar SQLAlchemy como ORM desde
+el principio para que migrar a PostgreSQL en una versión multi-cliente
+(post-LACNIC) sea un cambio de configuración, no una reescritura.
+
+### Decisión tecnológica: FastAPI para la capa de API
+
+El portal web NO debe leer la base de datos directamente. FastAPI expone
+endpoints REST entre la base de datos y el portal, y es además el estándar
+de facto para servir predicciones de modelos scikit-learn ya entrenados
+(relevante para exponer el Módulo 2 / Classifier).
+
+### Alcance del portal web para el TFM (no para la versión LACNIC)
+
+Definido explícitamente por Andrés: dashboard simple de solo lectura, NO
+portal multi-cliente con login/gestión compleja. Debe incluir:
+- Vista de inventario por categoría (las 7 categorías del esquema arriba)
+- Gráficas de compatibilidad y progreso de migración
+- Chat LLM conversacional para que el administrador complete sedes y
+  aplicaciones, y para responder preguntas sobre la hoja de ruta según
+  la realidad detectada de su red
+
+Andrés no tiene experiencia previa en frontend (no usar React/Vue salvo
+que se decida lo contrario explícitamente). Resolver con el stack más
+simple posible del lado de Python/HTML que sea compatible con buenas
+prácticas — evaluar en su momento si Streamlit, Flask+Jinja, o similar,
+según lo que necesite el chat interactivo y las gráficas.
+
+### Docker — parte del roadmap de despliegue, no urgente para el TFM
+
+Cuando exista base de datos + API + portal + dependencia del binario nmap,
+"instalar el proyecto" deja de ser trivial. Docker resuelve esto empaquetando
+todo en una imagen reproducible. Empaquetar nmap DENTRO de un Dockerfile
+(como instrucción de instalación del sistema operativo del contenedor) es
+diferente y aceptable respecto a redistribuir el binario en el repositorio
+de código — no viola la misma preocupación de licencia que ya se descartó
+antes. Como beneficio adicional, un contenedor Linux elimina por completo
+el problema de archivos `._*` del disco externo no-APFS de macOS, porque
+el filesystem del contenedor es independiente del host.
+
+No implementar Docker todavía. Sí documentarlo en la memoria del TFM como
+parte de la arquitectura de despliegue planeada.
+
+### Orden de construcción acordado (no saltarse pasos)
+
+1. ✅ Módulo 1 (Discovery) — completo
+2. 🔄 Fix timeout dinámico en scanner.py — en curso
+3. ⏭️ Módulo 2 (Classifier ML) — SIGUIENTE PASO, no desviarse de esto
+4. Base de datos (SQLite + esquema de arriba)
+5. Portal web + chat LLM + Docker
+
