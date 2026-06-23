@@ -241,3 +241,29 @@ Esperar resultado de prueba con 2 PCs Windows en la misma red doméstica antes
 de decidir cuál de las 4 vías priorizar. NO implementar nada de esto hasta
 completar Módulo 2 (ML) según orden ya acordado.
 
+
+## Lección aprendida: causa real de "desconocido" en vendor/hostname
+
+Diagnosticado 23-jun-2026. NO es un bug de parsing en _parse_host() ni
+case-mismatch entre MAC y vendor dict (confirmado inspeccionando python-nmap
+0.7.1 directamente: ambas claves se construyen del mismo atributo XML en la
+misma iteración, nunca pueden diferir en case en esta versión de la librería).
+
+Causa real: nmap necesita privilegios root para leer MAC address/vendor vía
+ARP. Si una corrida se ejecuta sin sudo, vendor/MAC quedan como "desconocido"
+aunque el host se detecte. Esto ya estaba parcialmente avisado en el mensaje
+de sudo existente en scanner.py, pero antes de profundizar el diagnóstico no
+era obvio que ESTA fuera la causa específica de lo que se observó en pruebas.
+
+Se agregó normalización defensiva case-insensitive de MAC↔vendor en
+_parse_host() como salvaguarda (no resuelve la causa real, pero no hace daño
+y cubre el caso de un binario/versión de nmap distinto con formato de MAC
+diferente).
+
+Recalibración de timeout con datos reales de campo:
+  SECONDS_PER_HOST_FULL = 4   (con -O; medido: 815s / 256 hosts ≈ 3.18s/host + margen)
+  SECONDS_PER_HOST_FAST = 1   (sin -O; estimado, pendiente validar con datos reales)
+
+Siempre verificar PRIMERO si el comando se ejecutó con sudo antes de
+sospechar un bug de código cuando aparezcan campos "desconocido" en
+vendor/hostname/OS.
