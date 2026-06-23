@@ -1,0 +1,33 @@
+# Byte-compiled / cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Entornos
+.env
+venv/
+.venv/
+
+# Datos generados (se ignoran salvo los .gitkeep)
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# Empaquetado
+*.egg-info/
+dist/
+build/
+
+# Sistema operativo / editores
+.DS_Store
+._*
+.vscode/settings.json
+*.log
+
+# Claude Code (configuración local, no versionar)
+.claude/settings.local.json
+
+# pytest
+.pytest_cache/
