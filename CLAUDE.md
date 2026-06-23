@@ -193,3 +193,51 @@ parte de la arquitectura de despliegue planeada.
 4. Base de datos (SQLite + esquema de arriba)
 5. Portal web + chat LLM + Docker
 
+## Brainstorm: Identificación de equipos de red profesionales (firewalls/switches/routers)
+
+Disparado por preocupación real: ¿puede la herramienta identificar correctamente
+equipos de red profesionales (no solo dispositivos IoT domésticos)?
+
+### Hallazgo de la prueba en red doméstica real (192.168.68.0/24, 23-jun-2026)
+- nmap -sV -O -n SÍ entrega vendor por MAC correctamente (Roku, Samsung,
+  TP-Link Systems) — esto fue un bug de parsing en _parse_host(), no
+  limitación de nmap. Corregido en fix/scanner-timeout-dinamico.
+- "Too many fingerprints match this host" apareció en 3 de 5 hosts reales —
+  limitación REAL y documentada de fingerprinting OS pasivo en dispositivos
+  de consumo con pilas TCP/IP genéricas. Buena evidencia citable para TFM
+  (sección de limitaciones o estado del arte).
+- Paradoja de seguridad: cuanto MEJOR configurado el firewall/equipo
+  profesional (bloqueo de ICMP, probes inusuales), MÁS difícil para nmap
+  hacer fingerprinting. La seguridad bien hecha es adversaria del
+  descubrimiento pasivo.
+
+### 4 vías identificadas para mejorar identificación de equipos profesionales
+(en orden de impacto, ninguna implementada aún)
+
+1. **SNMP real** (mayor impacto, brecha más clara hoy):
+   mock_devices.json ya tiene snmp_available pero el NetworkScanner NO
+   consulta SNMP real, solo asume el campo desde el mock. sysDescr via SNMP
+   da modelo/versión exacta sin depender de fingerprinting de paquetes —
+   mucho más confiable que -O para switches/routers/firewalls administrados.
+
+2. **Banner grabbing en puertos de administración** (SSH/HTTPS):
+   nmap -sV ya hace esto parcialmente (confirmado: detectó "OpenWrt uHTTPd"
+   en el router doméstico real). Se puede ampliar con scripts NSE específicos
+   para banners de vendors de red (Cisco, Fortinet, etc.)
+
+3. **Chat LLM para casos ambiguos** (conecta con diseño ya existente):
+   mismo patrón ya documentado para sedes/aplicaciones — si el equipo no se
+   identifica con confianza, el chat le pregunta directamente al administrador
+   "detecté un dispositivo en X que no pudimos identificar — ¿qué es?"
+
+4. **Heurística ampliada de puertos+vendor sin -O**:
+   _infer_device_type() ya usa puerto 9100→impresora. Ampliar: combinaciones
+   de puertos (443+22+161) + vendor por MAC (Fortinet/Cisco) son altamente
+   indicativos de firewall/router administrado sin necesitar fingerprint de
+   OS completo vía -O.
+
+### Decisión pendiente
+Esperar resultado de prueba con 2 PCs Windows en la misma red doméstica antes
+de decidir cuál de las 4 vías priorizar. NO implementar nada de esto hasta
+completar Módulo 2 (ML) según orden ya acordado.
+
