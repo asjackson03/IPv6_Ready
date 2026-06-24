@@ -630,3 +630,73 @@ reales, el rol declarado por el modelo se respeta sin cambios).
 
 Validación interactiva repitiendo el caso real del Nexus 9400 pendiente de
 confirmar por Andrés.
+
+## Cierre del Módulo 3a: Parser de configuración con chat guiado (24-jun-2026)
+
+Estado: COMPLETO y validado con 3 rondas de pruebas de campo reales
+usando Ollama (llama3.1:8b en Docker). 45 tests automatizados en verde.
+
+### Flujo final implementado
+1. Perfil del cliente (final/ISP) + cantidad de sedes
+2. Por cada equipo de capa 3: selección explícita de rol
+   [1] Firewall hace capa 3 / [2] Switch core (capa 3 separada de
+   seguridad) / [3] Otro
+3. Si [2]: se levanta el switch Y obligatoriamente el firewall
+   complementario (sin capa 3, pero con interfaces relevantes tipo DMZ)
+4. Por equipo: marca/modelo → comando sugerido (CommandGuide) → captura
+   multilínea → pre-filtrado determinista (ConfigPrefilter) → extracción
+   estructurada con LLM local (OllamaClient) → resumen tabulado
+5. Consolidación final en JSON (data/processed/topology_session_*.json)
+
+### Los 6 bugs reales encontrados y corregidos (en orden cronológico)
+1. **Alucinación ante contenido vacío**: switch L2 sin config real generó
+   100 VLANs + RIP/OSPF inventados con confianza "alta". Fix: guardia
+   ConfigPrefilter.has_meaningful_content() antes de invocar a Ollama.
+2. **Datos declarados ignorados + tipos inconsistentes**: campo "modelo"
+   no usaba lo que el usuario ya declaró; políticas en null en vez de 0.
+   Fix: inyección explícita de vendor_modelo_declarado en el prompt +
+   normalización defensiva null→0.
+3. **rol_logico contradictorio con evidencia (caso Nexus 9400)**:
+   clasificado "capa3_y_seguridad" con 0 políticas reales. Fix: criterio
+   explícito en prompt + degradación automática si hay inconsistencia,
+   con nota transparente.
+4. **Filtrado por línea perdía contexto de bloque (FortiOS)**: política
+   con "set status disable" se perdía completa (1/1/0 en vez de 2/1/1
+   real). Fix: ConfigPrefilter rediseñado para evaluar BLOQUES completos
+   (explícitos config/edit/next/end, o por indentación para Cisco),
+   reteniendo retrocompatibilidad exacta con el comportamiento Cisco ya
+   validado.
+5. **Políticas/licencias inventadas sin evidencia textual**: switch puro
+   de enrutamiento (sin ninguna mención de policy/license en el texto)
+   generó políticas=1/1/0 y licencias.detectadas=true con nota vacía.
+   Fix: validación cruzada contra keywords de evidencia real
+   (EVIDENCIA_POLITICAS_KEYWORDS / EVIDENCIA_LICENCIAS_KEYWORDS) antes
+   de aceptar valores no-cero/no-false del modelo.
+6. **rol_logico del firewall complementario no usaba contexto conocido**:
+   Ollama infirió "capa3_y_seguridad" para un firewall que, por diseño
+   del flujo (Caso 2), se sabe con certeza que NO tiene capa 3 (esa
+   función la tiene el switch core procesado justo antes). Fix: rol
+   forzado en Python (_forzar_rol_firewall_complementario), sin
+   depender de la inferencia del modelo para algo que el código ya sabe.
+
+### Patrón de diseño consistente en los 6 fixes
+Doble capa siempre: (a) refuerzo del prompt con criterio explícito, y
+(b) validación/normalización determinista en Python después de recibir
+la respuesta - nunca se confía ciegamente en que el modelo siga
+instrucciones al 100%. Mismo principio aplicado desde el Módulo 1
+(caso "Sony Blu-Ray Player": nunca presentar alta confianza sobre datos
+sin evidencia real).
+
+### Pendiente — quedó fuera del Módulo 3a, reubicado al Módulo 3b
+La pregunta de "dispositivo intermedio entre firewall e ISP" y "cómo se
+conecta el firewall al ISP" se sacó deliberadamente del flujo de 3a
+(que ahora se enfoca solo en estructura de equipos de capa 3) y debe
+vivir en el Módulo 3b conversacional, junto con: cuántos ISPs tiene el
+cliente, IPoE/PPPoE si es ISP, sedes/aplicaciones (ver brainstorm de
+arquitectura BD/portal ya documentado arriba en este archivo).
+
+### Próximo paso
+Módulo 3b: chat conversacional para información que NO es extraíble de
+un archivo de configuración (contexto organizacional, topología
+perimetral, criticidad de negocio). Diseño conceptual ya existe en
+secciones anteriores de este archivo; falta concretar la implementación.
