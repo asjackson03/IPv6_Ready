@@ -101,6 +101,20 @@ sus propios administradores creen.
   PENDIENTE de validar por Andrés: `docker-compose up --build` (Docker no
   está instalado en la máquina de desarrollo de esta sesión; sí se validó la
   app vía TestClient en memoria y `docker-compose config` sin errores).
+- ✅ Módulo 3a (parser de configuración + chat guiado) implementado. CLI
+  conversacional (`--topology` en `main.py`, modo separado de discovery). Cuatro
+  clases en `src/roadmap/`: `CommandGuide` (comandos por familia, determinista),
+  `ConfigPrefilter` (recorte determinista por keywords/IP antes del LLM),
+  `OllamaClient` (wrapper de `ollama==0.1.7`, usa `format='json'` + temperatura
+  0.15, retry ante JSON inválido, error claro si el servicio está caído; mismo
+  principio "nunca inventar" del Módulo 1 vía `confianza_extraccion`/
+  `notas_ambiguedad`), y `TopologySession` (orquesta el flujo, guarda
+  `data/processed/topology_session_*.json`). 29 tests en verde (20+9; los de
+  ollama mockean la librería, no necesitan el contenedor). NOTA dependencias:
+  `ollama==0.1.7` fija `httpx<0.26` → httpx bajó a 0.25.2 (compatible con el
+  TestClient del Módulo 2, verificado). Falta: 3b (chat de contexto no
+  derivable de config) y 3c (generador de roadmap). Validación interactiva de
+  `--topology` con Ollama real: pendiente, la hace Andrés manualmente.
 - 📌 TFM (documento Word): Capítulos 1, 2 y 5 redactados con la voz personal de
   Andrés (no tono genérico de paper). Estado del arte compara explícitamente
   contra Nmap, NDisc6, v6disc, SolarWinds, test-ipv6.com — posicionando el
@@ -503,3 +517,116 @@ del paso 5 necesita patrones específicos por familia de vendor (Cisco usa
 "!" como comentario, otros usan "#"; bloques "interface X" son bastante
 universales pero la sintaxis interna varía) - esto se diseña en detalle
 durante la implementación, no se ha definido el regex exacto todavía.
+
+## Bug real encontrado y corregido: alucinación de Ollama con texto sin evidencia (Módulo 3a)
+
+Detectado en prueba interactiva real de `--topology` (23-jun-2026, el mismo
+día se ajustó). Al declarar un switch puramente de capa 2 ("sin componente
+capa 3"), el administrador escribió como respuesta el texto libre
+"es capa 2, no tiene componente capa 3" en vez de pegar una configuración.
+
+`ConfigPrefilter.prefilter()` redujo correctamente ese texto a 0 líneas
+útiles (sin keywords técnicas ni IPs) — el filtrado determinista funcionó
+bien. El problema estaba en `OllamaClient.extract_device_info()`: ese texto
+casi vacío se enviaba igual al modelo, que **alucinó una respuesta completa**
+(100 VLANs, protocolos RIP+OSPF, `confianza_extraccion="alta"`) sin ninguna
+base real. Viola directamente el mismo principio del caso "Sony Blu-Ray
+Player" del Módulo 1 (ver sección de arriba), pero más grave: aquí no hubo
+NINGÚN dato de entrada real, ni siquiera ambiguo.
+
+Fix de dos capas:
+1. **Guardia determinista pre-LLM** (`ConfigPrefilter.has_meaningful_content()`,
+   usado al inicio de `OllamaClient.extract_device_info()`): si el texto
+   filtrado no tiene al menos 30 caracteres no-whitespace Y al menos una
+   línea con keyword técnico/IP, **no se llama a Ollama en absoluto** — se
+   devuelve directamente un dict determinista de "sin información"
+   (`confianza_extraccion="baja"`, todo vacío/null). Ahorra además el tiempo
+   de inferencia.
+2. **Refuerzo del prompt** para los casos de evidencia parcial que sí pasan
+   la guardia: instrucción explícita de preferir respuesta honesta con baja
+   confianza sobre respuesta completa pero inventada.
+
+También se agregó un aviso de alcance al inicio de `--topology`
+(`TopologySession._aviso_alcance()`): aclara que el levantamiento es solo
+para equipos de capa 3/seguridad, y que los switches puramente de capa 2 no
+necesitan relevarse individualmente — para evitar que el administrador
+intente forzar una respuesta sobre un equipo que no aplica.
+
+4 tests nuevos (33 en total, todos en verde):
+`test_config_prefilter_has_meaningful_content_true/false`,
+`test_extract_device_info_empty_content_no_llm_call` (verifica 0 invocaciones
+al mock de Ollama), `test_extract_device_info_with_real_evidence_case`
+(reproduce el caso exacto del bug).
+
+Validación interactiva con el mismo caso real pendiente de confirmar por
+Andrés con el contenedor Ollama corriendo.
+
+## Dos inconsistencias menores corregidas (prueba real con Nexus 9400)
+
+Detectadas en prueba interactiva real de `--topology` con configuración de
+Cisco Nexus 9400 (23-jun-2026).
+
+1. **Campo "modelo" quedaba null aunque el usuario lo declaró explícitamente**
+   ("cisco nexus 9400" en la pregunta de marca/modelo). Causa: ese dato de
+   entrada del usuario nunca llegaba al prompt de `extract_device_info()` —
+   el modelo solo veía el texto de configuración filtrado, sin el contexto
+   de lo que el administrador ya había declarado. Fix: nuevo parámetro
+   `vendor_modelo_declarado` en `OllamaClient.extract_device_info()`, se
+   incluye explícitamente en el prompt con prioridad clara (un "show version"
+   real en el texto gana sobre lo declarado, pero si el texto no lo
+   menciona, se usa el dato declarado en vez de null).
+   `TopologySession._capturar_dispositivo()` ahora pasa `entrada` (la misma
+   que ya se guarda como `_entrada_usuario`) como ese parámetro.
+
+2. **Campos numéricos de "politicas" quedaban null en vez de 0** cuando no
+   hay ninguna política de firewall en la configuración (caso real: switch/
+   router de core sin reglas). El esquema los define como int, no int|null.
+   Fix de dos capas, mismo patrón que la guardia de contenido vacío: (a)
+   refuerzo explícito en el prompt ("DEBEN ser siempre números enteros,
+   nunca null... usa 0"), y (b) normalización defensiva en Python
+   (`OllamaClient._normalizar()`) que convierte cualquier null remanente en
+   los tres campos de `politicas` a 0 después de parsear la respuesta — no
+   se confía ciegamente en que el modelo siga la instrucción del prompt.
+
+2 tests nuevos (35 en total, todos en verde):
+`test_extract_device_info_uses_declared_vendor_model` (captura el prompt
+real enviado al mock y verifica que contiene el string declarado),
+`test_extract_device_info_politicas_null_normalized_to_zero` (mockea una
+respuesta con los tres campos en null, verifica que el dict final los
+normaliza a 0).
+
+Validación interactiva repitiendo el caso real del Nexus 9400 pendiente de
+confirmar por Andrés.
+
+## Bug de clasificación corregido: rol_logico="capa3_y_seguridad" sin políticas de respaldo (Nexus 9400)
+
+Detectado en la misma prueba real con configuración de Cisco Nexus 9400
+(switch/router de core, SIN firewall). El modelo clasificó
+`rol_logico="capa3_y_seguridad"` para un equipo cuya extracción de
+`politicas` fue `{0, 0, 0}` — JSON internamente inconsistente: "tiene
+función de seguridad" pero "cero políticas de cualquier tipo". Un Nexus
+9400 es capa 3 pura; "seguridad" en este esquema es específicamente
+firewall/filtrado/NAT, no importancia general del equipo en la red — la
+sola presencia de BGP/OSPF/rutas/VLANs no implica esa función.
+
+Fix de dos capas (mismo patrón que null→0 en políticas):
+1. **Refuerzo del prompt**: criterio estricto y determinista para
+   `rol_logico` (firewall+enrutamiento → `capa3_y_seguridad`; solo
+   enrutamiento → `capa3_solo`; solo firewall → `seguridad_solo`; ninguno
+   → `capa2_solo`/`desconocido`), con la advertencia explícita de que
+   BGP/OSPF/rutas/VLANs no son evidencia de seguridad.
+2. **Degradación defensiva en Python**
+   (`OllamaClient._corregir_rol_logico_inconsistente()`, parte de
+   `_normalizar()`): si `rol_logico` es `capa3_y_seguridad` o
+   `seguridad_solo` pero `cantidad_total_declaradas` de políticas es 0,
+   degrada a `capa3_solo`/`desconocido` respectivamente y agrega una nota
+   transparente a `notas_ambiguedad` explicando el ajuste — no se asume en
+   silencio que el modelo se equivocó, se documenta la corrección.
+
+2 tests nuevos (37 en total, todos en verde):
+`test_rol_logico_seguridad_sin_politicas_se_degrada` (verifica degradación +
+nota), `test_rol_logico_seguridad_con_politicas_se_mantiene` (con políticas
+reales, el rol declarado por el modelo se respeta sin cambios).
+
+Validación interactiva repitiendo el caso real del Nexus 9400 pendiente de
+confirmar por Andrés.

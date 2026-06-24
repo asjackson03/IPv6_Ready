@@ -126,6 +126,17 @@ def build_parser() -> argparse.ArgumentParser:
             "modelo entrenado (usa --train si aún no existe)."
         ),
     )
+    parser.add_argument(
+        "--topology",
+        action="store_true",
+        help=(
+            "Modo de levantamiento conversacional (Módulo 3a). Flujo en "
+            "terminal, SEPARADO de --demo/--target: guía al administrador para "
+            "capturar y estructurar la configuración de los equipos de capa 3 "
+            "y seguridad usando el LLM local (Ollama). Requiere el servicio "
+            "Ollama corriendo."
+        ),
+    )
     return parser
 
 
@@ -137,6 +148,14 @@ def resolve_formats(fmt: str) -> list[str]:
 def run(args: argparse.Namespace) -> int:
     """Ejecuta el flujo completo del Módulo 1. Devuelve un código de salida."""
     load_dotenv()  # carga variables de .env si existe
+
+    # Modo levantamiento conversacional (Módulo 3a): flujo completamente
+    # separado del discovery/clasificación. Import perezoso para no exigir la
+    # librería ollama cuando se usan los otros modos.
+    if args.topology:
+        from src.roadmap.topology_session import TopologySession
+        TopologySession().run_interactive()
+        return 0
 
     output_dir = args.output or os.getenv("DEFAULT_OUTPUT_DIR", "data/raw/")
     formats = resolve_formats(args.format)
