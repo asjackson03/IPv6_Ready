@@ -437,3 +437,69 @@ posiblemente de una instalación anterior de Docker que Andrés mencionó
 ("lo instalé alguna vez pero no lo usé"). Fix aplicado: agregar la ruta
 del binario directamente al PATH en ~/.zshrc:
   export PATH="/Applications/Docker.app/Contents/Resources/bin:$PATH"
+
+## Diseño completo del Módulo 3a: Parser de configuración (definido 24-jun-2026)
+
+Diseño consolidado tras sesión de brainstorm con Andrés, basado en su
+experiencia real de levantamiento en campo. Pendiente de implementar.
+
+FLUJO COMPLETO:
+1. Chat pregunta cuál equipo es la capa 3 de la red → marca y modelo
+2. Chat pregunta topología perimetral: ¿hay IPS u otro dispositivo entre
+   el firewall y el ISP? ¿cómo se conecta el firewall al ISP?
+3. Chat indica el comando EXACTO a ejecutar según marca/modelo (reduce
+   problema de 10,000→~1,000 líneas desde el origen, no por filtrado
+   posterior de un archivo gigante)
+4. Administrador pega el output del comando
+5. Pre-filtrado determinista (regex/patrones, SIN LLM): elimina líneas
+   vacías, comentarios, agrupa por bloques reconocibles
+6. Bloque filtrado se pasa a Ollama (llama3.1:8b, ya validado y corriendo)
+   con prompt estructurado pidiendo JSON con esquema fijo (ver abajo)
+7. Chat pregunta: "¿este mismo equipo maneja también la seguridad
+   (firewall) o es un equipo separado (firewall + switch core)?" -
+   si es separado, vuelve al paso 1 para el segundo equipo
+8. Chat pregunta si quiere agregar otro dispositivo - si sí, vuelve a 1
+9. Al terminar: consolida todos los dispositivos del levantamiento en
+   una sola estructura sesion_levantamiento + dispositivos[]
+
+ESQUEMA JSON DE SALIDA (por dispositivo, dentro de dispositivos[]):
+{
+  "nombre_asignado": str,
+  "rol_logico": str,  // "capa3_y_seguridad" | "capa3_solo" | "seguridad_solo" | etc
+  "vendor_declarado": str,
+  "modelo": str,
+  "version_so": str,
+  "licencias_adicionales": {"detectadas": bool, "notas": str},
+  "interfaces": [{"nombre","ip_v4","ip_v6","vlan_id","estado"}],
+  "vlans_detectadas": [int],  // = cantidad de segmentos de red
+  "dhcp": {"es_servidor_dhcp": bool, "tiene_dhcp_relay": bool,
+           "ip_relay_destino": str|null},
+  "enrutamiento": {"protocolos_detectados": [str], "rutas_estaticas": [str],
+                    "bgp_detalle": {"as_number","vecinos"}},
+  "politicas": {"cantidad_total_declaradas": int, "cantidad_activas": int,
+                 "cantidad_inactivas_o_deshabilitadas": int},
+                 // NO incluir detalle línea por línea de cada política en
+                 // esta fase - decisión explícita de Andrés, Fase I solo
+                 // necesita el conteo de activas vs inactivas, no el
+                 // detalle de source/destination de cada regla
+  "ipv6_configurado_en_algo": bool,
+  "confianza_extraccion": "alta"|"media"|"baja",
+  "notas_ambiguedad": [str]
+}
+
+Nivel superior (sesion_levantamiento): fecha, tipo_cliente,
+dispositivo_capa3_principal, topologia_perimetral (ips_intermedio,
+conexion_isp, dispositivos_entre_firewall_e_isp)
+
+HALLAZGO DE CAMPO QUE JUSTIFICA EL CAMPO licencias_adicionales:
+Andrés reportó un caso real (1 de 15 entidades en su experiencia) donde
+un switch L2 requería una licencia adicional para activar funciones L3,
+y esa licencia específica NO soportaba IPv6 - hallazgo crítico que un
+diagnóstico solo de hardware/OS nunca detectaría. Justifica por qué este
+campo existe explícitamente en el esquema, aunque sea infrecuente.
+
+DECISIÓN PENDIENTE para cuando se implemente: el pre-filtrado determinista
+del paso 5 necesita patrones específicos por familia de vendor (Cisco usa
+"!" como comentario, otros usan "#"; bloques "interface X" son bastante
+universales pero la sintaxis interna varía) - esto se diseña en detalle
+durante la implementación, no se ha definido el regex exacto todavía.
