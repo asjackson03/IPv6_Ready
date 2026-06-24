@@ -1,0 +1,14 @@
+# Dependencias mínimas del contenedor del Módulo 2 (Classifier ML + API).
+# NO incluye python-nmap ni pysnmp: el Módulo 1 (escaneo de red) corre nativo
+# fuera de Docker porque necesita acceso de bajo nivel a la interfaz de red.
+# pandas/colorama/tabulate son necesarios porque importar src.discovery
+# (del que el extractor de características reutiliza IPv6Checker) ejecuta el
+# __init__ del paquete, que carga InventoryManager.
+scikit-learn==1.4.0
+numpy==1.26.4
+joblib==1.3.2
+pandas==2.2.0
+colorama==0.4.6
+tabulate==0.9.0
+fastapi==0.110.0
+uvicorn==0.27.0

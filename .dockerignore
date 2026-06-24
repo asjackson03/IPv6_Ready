@@ -1,0 +1,27 @@
+# Excluye del contexto de build de Docker todo lo que no necesita la imagen.
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Entornos virtuales (el venv del proyecto vive fuera del repo, pero por si acaso).
+.venv/
+venv/
+env/
+
+# Datos generados en tiempo de ejecución (no deben hornearse en la imagen).
+data/raw/
+data/processed/
+
+# Control de versiones y metadatos.
+.git/
+.gitignore
+
+# Archivos basura de macOS sobre disco no-APFS (ver CLAUDE.md). Al construir
+# desde macOS conviene excluirlos para no contaminar el contexto de build.
+._*
+.DS_Store
+
+# Documentación y archivos no necesarios en runtime.
+*.md
+tests/

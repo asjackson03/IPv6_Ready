@@ -1,0 +1,43 @@
+# docker-compose.yml — Orquestación del Módulo 2 (Classifier ML) y la base
+# para el Módulo 3 (LLM local con Ollama).
+#
+# El Módulo 1 (escaneo con nmap) NO está aquí: corre nativo en el host porque
+# necesita acceso de bajo nivel a la red. Ver README para el flujo completo.
+services:
+
+  classifier:
+    build:
+      context: .
+      dockerfile: Dockerfile.classifier
+    image: ipv6-ready-classifier:latest
+    container_name: ipv6-classifier
+    ports:
+      - "8000:8000"
+    volumes:
+      # Monta ./data para que el modelo entrenado (data/processed) persista
+      # entre reinicios y para leer data/sample/ desde el contenedor.
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ---------------------------------------------------------------------------
+  # Servicio Ollama (LLM local) — BASE PARA EL MÓDULO 3, aún sin implementar.
+  # En el Módulo 3 alimentará el parser de configuración (show run) y el chat
+  # conversacional. Aquí solo queda DEFINIDO: NO se hace pull de modelos ni se
+  # arranca en esta fase. Configuración básica de CPU (sin GPU) a propósito.
+  # ---------------------------------------------------------------------------
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ipv6-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      # Volumen nombrado para no re-descargar los modelos en cada rebuild.
+      - ollama_models:/root/.ollama
+
+volumes:
+  ollama_models:

@@ -90,6 +90,17 @@ sus propios administradores creen.
   aquí, hallazgo a documentar en la memoria. `ipv6_score_normalized` quedó en
   0.000 (redundante con `has_ipv6`), también citable como limitación del
   dataset sintético, no bug.
+- ✅ Módulo 2 containerizado. `src/classifier/api.py` (FastAPI) expone
+  `GET /`, `GET /health`, `POST /train`, `POST /classify` (503 claro si el
+  modelo no está entrenado, no 500). `Dockerfile.classifier` +
+  `requirements.classifier.txt` (sin nmap/pysnmp) + `docker-compose.yml`
+  (servicio `classifier` con volumen `./data`; servicio `ollama` DEFINIDO
+  pero sin usar todavía — base para Módulo 3). 20 tests en verde (incluye
+  `tests/test_api.py` con TestClient, sin Docker). Decisión: Módulo 1 corre
+  NATIVO (necesita acceso de red), Módulo 2/3 en Docker para portabilidad.
+  PENDIENTE de validar por Andrés: `docker-compose up --build` (Docker no
+  está instalado en la máquina de desarrollo de esta sesión; sí se validó la
+  app vía TestClient en memoria y `docker-compose config` sin errores).
 - 📌 TFM (documento Word): Capítulos 1, 2 y 5 redactados con la voz personal de
   Andrés (no tono genérico de paper). Estado del arte compara explícitamente
   contra Nmap, NDisc6, v6disc, SolarWinds, test-ipv6.com — posicionando el

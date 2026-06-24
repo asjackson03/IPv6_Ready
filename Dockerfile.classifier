@@ -1,0 +1,28 @@
+# Dockerfile.classifier — Contenedor del Módulo 2 (Classifier ML + API REST).
+#
+# Solo empaqueta el Módulo 2 y su API. El Módulo 1 (escaneo con nmap) NO se
+# containeriza: requiere acceso de bajo nivel a la interfaz de red del host y
+# corre nativo. Por eso aquí NO se instala nmap.
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# 1) Dependencias mínimas (capa cacheable: solo se reinstala si cambian).
+COPY requirements.classifier.txt ./requirements.classifier.txt
+RUN pip install --no-cache-dir -r requirements.classifier.txt
+
+# 2) Código de la aplicación. Se copia src.discovery porque el extractor de
+#    características del Módulo 2 reutiliza IPv6Checker, e importar el paquete
+#    src.discovery ejecuta su __init__ (que carga InventoryManager).
+COPY src/__init__.py ./src/__init__.py
+COPY src/classifier/ ./src/classifier/
+COPY src/discovery/ ./src/discovery/
+
+# 3) Dataset de entrenamiento por defecto (para POST /train sin argumentos).
+COPY data/sample/training_dataset.json ./data/sample/training_dataset.json
+
+EXPOSE 8000
+
+# Sirve la API. El modelo entrenado se escribe en /app/data/processed, que se
+# monta como volumen (ver docker-compose.yml) para persistir entre reinicios.
+CMD ["uvicorn", "src.classifier.api:app", "--host", "0.0.0.0", "--port", "8000"]
