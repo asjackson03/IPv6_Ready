@@ -38,6 +38,18 @@ JSON_SCHEMA = """{
   "notas_ambiguedad": ["lista de strings, explica cualquier dato que no pudiste determinar con certeza"]
 }"""
 
+# Palabras clave que deben aparecer en el texto filtrado para aceptar que el
+# modelo detectó políticas de firewall reales (ver _validar_politicas_contra_
+# evidencia). Si el modelo declara políticas sin que ninguna de estas
+# aparezca en el texto, se asume que el valor es inventado, no extraído.
+EVIDENCIA_POLITICAS_KEYWORDS = [
+    "policy", "policies", "access-list", "acl", "firewall rule", "regla",
+]
+
+# Igual que arriba, pero para aceptar licencias_adicionales.detectadas=true
+# (ver _validar_licencias_contra_evidencia).
+EVIDENCIA_LICENCIAS_KEYWORDS = ["license", "licencia", "feature"]
+
 # Excepciones que indican que el servicio Ollama no está accesible (contenedor
 # apagado, puerto cerrado, conexión rechazada), a diferencia de una respuesta
 # recibida pero mal formada.
@@ -116,7 +128,7 @@ class OllamaClient:
 
         parsed = self._try_parse_json(raw)
         if parsed is not None:
-            return self._normalizar(parsed)
+            return self._normalizar(parsed, filtered_config)
 
         # Segundo intento (más enfático en "solo JSON").
         prompt2 = self._build_prompt(
@@ -130,7 +142,7 @@ class OllamaClient:
 
         parsed2 = self._try_parse_json(raw2)
         if parsed2 is not None:
-            return self._normalizar(parsed2)
+            return self._normalizar(parsed2, filtered_config)
 
         # Falló dos veces: devolver fallback honesto de baja confianza.
         return self._invalid_json_dict()
@@ -225,7 +237,16 @@ class OllamaClient:
             "dato, y reduce confianza_extraccion a 'baja' o 'media' según la "
             "cantidad de evidencia real disponible. Es preferible una "
             "respuesta honesta con baja confianza que una respuesta completa "
-            "pero inventada."
+            "pero inventada.\n"
+            "- Para cada campo numérico o booleano, basa tu respuesta "
+            "ÚNICAMENTE en evidencia textual explícita presente en la "
+            "configuración proporcionada. Si no encuentras menciones de "
+            "políticas de firewall, usa 0 en los campos de politicas. Si no "
+            "encuentras menciones de licencias, usa detectadas=false. No "
+            "infieras estos campos a partir de la presencia de otros "
+            "elementos no relacionados (ej. la presencia de VLANs o "
+            "protocolos de enrutamiento NO implica que existan políticas de "
+            "firewall o licencias adicionales)."
             f"{enfasis}\n"
             "Configuración a analizar:\n"
             "-----\n"
@@ -241,11 +262,15 @@ class OllamaClient:
     }
 
     @classmethod
-    def _normalizar(cls, parsed: dict) -> dict:
+    def _normalizar(cls, parsed: dict, filtered_config: str = "") -> dict:
         """Corrige defensivamente el JSON ya parseado antes de retornarlo.
 
         No basta con instruir al prompt: los modelos pequeños no siguen el
-        100% de las reglas. Aplica dos normalizaciones independientes.
+        100% de las reglas. Aplica varias normalizaciones independientes, en
+        orden: primero rellena nulls de politicas con 0, luego valida
+        politicas/licencias contra evidencia textual real (puede degradar
+        valores inventados a 0/false), y por último corrige rol_logico si
+        quedó inconsistente con el resultado de esas validaciones.
         """
         politicas = parsed.get("politicas")
         if isinstance(politicas, dict):
@@ -257,8 +282,88 @@ class OllamaClient:
                 if politicas.get(campo) is None:
                     politicas[campo] = 0
 
+        cls._validar_politicas_contra_evidencia(parsed, filtered_config)
+        cls._validar_licencias_contra_evidencia(parsed, filtered_config)
         cls._corregir_rol_logico_inconsistente(parsed)
         return parsed
+
+    @staticmethod
+    def _agregar_nota(parsed: dict, nota: str) -> None:
+        """Agrega una nota a notas_ambiguedad, creando la lista si no existe."""
+        notas = parsed.get("notas_ambiguedad")
+        if not isinstance(notas, list):
+            notas = []
+        notas.append(nota)
+        parsed["notas_ambiguedad"] = notas
+
+    @classmethod
+    def _validar_politicas_contra_evidencia(cls, parsed: dict,
+                                            filtered_config: str) -> None:
+        """Degrada politicas a 0/0/0 si el modelo las declaró sin respaldo textual.
+
+        Caso real (Nexus 9400, switch de core sin firewall): el texto
+        filtrado era enrutamiento puro (interfaces, OSPF, BGP, DHCP relay)
+        sin ninguna mención de políticas/ACLs, pero el modelo devolvió
+        cantidad_total_declaradas=1 — un valor inventado, no extraído. No
+        basta con instruir al prompt para evitar esto: esta validación
+        cruzada determinista exige evidencia textual explícita (alguna
+        palabra de :data:`EVIDENCIA_POLITICAS_KEYWORDS`) antes de aceptar un
+        conteo de políticas mayor a cero.
+        """
+        politicas = parsed.get("politicas")
+        if not isinstance(politicas, dict):
+            return
+        total = politicas.get("cantidad_total_declaradas") or 0
+        if total <= 0:
+            return
+
+        texto = (filtered_config or "").lower()
+        if any(kw in texto for kw in EVIDENCIA_POLITICAS_KEYWORDS):
+            return  # hay respaldo textual: se acepta el valor del modelo.
+
+        politicas["cantidad_total_declaradas"] = 0
+        politicas["cantidad_activas"] = 0
+        politicas["cantidad_inactivas_o_deshabilitadas"] = 0
+        cls._agregar_nota(
+            parsed,
+            "Se detectaron políticas en la respuesta del modelo, pero el "
+            "texto de configuración no contiene evidencia de reglas de "
+            "firewall. Se ajustó el conteo a 0 por precaución."
+        )
+
+    @classmethod
+    def _validar_licencias_contra_evidencia(cls, parsed: dict,
+                                            filtered_config: str) -> None:
+        """Fuerza licencias_adicionales.detectadas=False sin respaldo textual.
+
+        Caso real (mismo Nexus 9400): el modelo devolvió
+        licencias_adicionales={"detectadas": true, "notas": ""} — una nota
+        vacía es en sí misma una señal de que no hay evidencia real detrás
+        de ese "true". Exige DOS condiciones para aceptar detectadas=true:
+        que el modelo haya escrito una nota explicativa no vacía, Y que el
+        texto filtrado contenga alguna palabra de
+        :data:`EVIDENCIA_LICENCIAS_KEYWORDS`.
+        """
+        licencias = parsed.get("licencias_adicionales")
+        if not isinstance(licencias, dict):
+            return
+        if not licencias.get("detectadas"):
+            return
+
+        notas_lic = (licencias.get("notas") or "").strip()
+        texto = (filtered_config or "").lower()
+        tiene_evidencia = any(kw in texto for kw in EVIDENCIA_LICENCIAS_KEYWORDS)
+
+        if notas_lic and tiene_evidencia:
+            return  # respaldo textual y justificación: se acepta.
+
+        licencias["detectadas"] = False
+        cls._agregar_nota(
+            parsed,
+            "El modelo indicó posibles licencias adicionales sin evidencia "
+            "textual clara ni justificación. Se ajustó a 'no detectadas' "
+            "por precaución; verificar manualmente si aplica."
+        )
 
     @classmethod
     def _corregir_rol_logico_inconsistente(cls, parsed: dict) -> None:

@@ -202,8 +202,17 @@ def test_rol_logico_seguridad_sin_politicas_se_degrada(monkeypatch):
 
 
 def test_rol_logico_seguridad_con_politicas_se_mantiene(monkeypatch):
-    """rol_logico='capa3_y_seguridad' con políticas reales → no se modifica."""
+    """rol_logico='capa3_y_seguridad' con políticas reales → no se modifica.
+
+    El texto incluye evidencia real de políticas ("access-list") para que la
+    validación cruzada de _validar_politicas_contra_evidencia() no degrade el
+    conteo a 0 (lo haría con CONFIG_CON_EVIDENCIA solo, que es enrutamiento
+    puro sin ninguna mención de reglas de firewall).
+    """
     client = OllamaClient()
+    config_con_politicas = (
+        CONFIG_CON_EVIDENCIA + "access-list 101 permit ip any any\n"
+    )
     respuesta = json.loads(VALID_JSON)
     respuesta["rol_logico"] = "capa3_y_seguridad"
     respuesta["politicas"] = {
@@ -216,7 +225,76 @@ def test_rol_logico_seguridad_con_politicas_se_mantiene(monkeypatch):
         lambda **kwargs: {"response": json.dumps(respuesta)},
     )
 
-    result = client.extract_device_info(CONFIG_CON_EVIDENCIA, "cisco_ios")
+    result = client.extract_device_info(config_con_politicas, "cisco_ios")
 
     assert result["rol_logico"] == "capa3_y_seguridad"
     assert result.get("notas_ambiguedad", []) == []
+
+
+def test_politicas_sin_evidencia_textual_se_degradan_a_cero(monkeypatch):
+    """Caso real Nexus 9400: politicas>0 sin ninguna mención en el texto → 0."""
+    client = OllamaClient()
+    respuesta = json.loads(VALID_JSON)
+    respuesta["politicas"] = {
+        "cantidad_total_declaradas": 1,
+        "cantidad_activas": 1,
+        "cantidad_inactivas_o_deshabilitadas": 0,
+    }
+    monkeypatch.setattr(
+        client._client, "generate",
+        lambda **kwargs: {"response": json.dumps(respuesta)},
+    )
+
+    # CONFIG_CON_EVIDENCIA es enrutamiento puro: ninguna mención de políticas.
+    result = client.extract_device_info(CONFIG_CON_EVIDENCIA, "cisco_ios")
+
+    assert result["politicas"] == {
+        "cantidad_total_declaradas": 0,
+        "cantidad_activas": 0,
+        "cantidad_inactivas_o_deshabilitadas": 0,
+    }
+    notas = " ".join(result.get("notas_ambiguedad", [])).lower()
+    assert "evidencia de reglas de firewall" in notas
+
+
+def test_politicas_con_evidencia_textual_se_mantienen(monkeypatch):
+    """La misma respuesta, pero con 'policy' en el texto → no se modifica."""
+    client = OllamaClient()
+    config_con_policy = CONFIG_CON_EVIDENCIA + "ip access-list policy TEST\n"
+    respuesta = json.loads(VALID_JSON)
+    respuesta["politicas"] = {
+        "cantidad_total_declaradas": 1,
+        "cantidad_activas": 1,
+        "cantidad_inactivas_o_deshabilitadas": 0,
+    }
+    monkeypatch.setattr(
+        client._client, "generate",
+        lambda **kwargs: {"response": json.dumps(respuesta)},
+    )
+
+    result = client.extract_device_info(config_con_policy, "cisco_ios")
+
+    assert result["politicas"] == {
+        "cantidad_total_declaradas": 1,
+        "cantidad_activas": 1,
+        "cantidad_inactivas_o_deshabilitadas": 0,
+    }
+    assert result.get("notas_ambiguedad", []) == []
+
+
+def test_licencias_sin_evidencia_se_fuerzan_a_false(monkeypatch):
+    """Caso real Nexus 9400: detectadas=true con notas vacío y sin evidencia."""
+    client = OllamaClient()
+    respuesta = json.loads(VALID_JSON)
+    respuesta["licencias_adicionales"] = {"detectadas": True, "notas": ""}
+    monkeypatch.setattr(
+        client._client, "generate",
+        lambda **kwargs: {"response": json.dumps(respuesta)},
+    )
+
+    # CONFIG_CON_EVIDENCIA no menciona "license"/"licencia"/"feature".
+    result = client.extract_device_info(CONFIG_CON_EVIDENCIA, "cisco_ios")
+
+    assert result["licencias_adicionales"]["detectadas"] is False
+    notas = " ".join(result.get("notas_ambiguedad", [])).lower()
+    assert "licencias adicionales" in notas

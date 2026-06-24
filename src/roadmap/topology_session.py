@@ -180,8 +180,27 @@ class TopologySession:
               f"completa.{Style.RESET_ALL}")
         entrada_fw = self._preguntar("Indica la marca/modelo del firewall")
         info_fw = self._procesar_equipo(entrada_fw, preguntar_rol_fallback=False)
+        info_fw = self._forzar_rol_firewall_complementario(info_fw)
         info_fw["_es_firewall_sin_capa3"] = True
         self.dispositivos.append(info_fw)
+
+    @staticmethod
+    def _forzar_rol_firewall_complementario(info: dict) -> dict:
+        """Fuerza rol_logico del firewall complementario por contexto del flujo.
+
+        El rol lógico del firewall complementario se determina por el
+        contexto del flujo (no tiene capa 3 por definición, ya que esa
+        función la cumple el switch core procesado en este mismo caso), no
+        por la inferencia del modelo, que puede confundir la presencia de
+        interfaces con IP como evidencia de enrutamiento dinámico aunque no
+        exista ningún protocolo de enrutamiento real configurado.
+        """
+        politicas = info.get("politicas") or {}
+        total_politicas = politicas.get("cantidad_total_declaradas") or 0
+        info["rol_logico"] = (
+            "seguridad_solo" if total_politicas > 0 else "desconocido"
+        )
+        return info
 
     def _caso_otro_equipo(self) -> None:
         """Caso 3: otro tipo de equipo de capa 3 — flujo estándar."""
