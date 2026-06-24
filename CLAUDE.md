@@ -368,3 +368,37 @@ Esto pertenece al Módulo 3, que en realidad tiene tres sub-componentes:
 Orden de construcción: Módulo 2 (ML) se completa PRIMERO (ya en curso).
 Módulo 3 completo (3a+3b+3c) se aborda DESPUÉS, no antes. 3a tiene prioridad
 sobre 3b dentro del Módulo 3, por preferencia explícita de Andrés.
+
+## Docker + disco externo no-APFS: nueva manifestación del problema ._*
+
+Ya conocido: el disco externo donde vive el proyecto no es APFS, por lo
+que macOS genera archivos de metadatos AppleDouble (._*) para cada archivo.
+Ya resuelto para pip (venv en disco interno) y para git (.gitignore con
+patrón ._*).
+
+Nueva manifestación (23-jun-2026, construcción Docker del Módulo 2):
+  docker-compose build fallaba con:
+    "failed to read dockerfile: error from sender: failed to xattr
+     .../._.claude: operation not permitted"
+  BuildKit (el motor de build de Docker, versión 29.5.3) es más estricto
+  leyendo extended attributes que versiones anteriores, y truena al
+  transferir el contexto de build si encuentra estos archivos ._* en el
+  disco, incluso ANTES de que .dockerignore tenga oportunidad de excluirlos
+  (el error ocurre en la fase de "load build definition", previa al
+  filtrado por .dockerignore).
+
+Fix aplicado (simple, no requiere cambiar arquitectura):
+  find . -name '._*' -delete
+  (ejecutar desde la raíz del proyecto, antes de cada docker-compose build,
+  si vuelven a aparecer estos archivos por uso normal de Finder/macOS sobre
+  el disco externo)
+
+Regla general a recordar: CUALQUIER herramienta que no sea nativamente
+consciente del comportamiento de macOS en discos no-APFS (pip, git,
+Docker BuildKit, y probablemente otras en el futuro) puede tropezar con
+este mismo patrón de archivos ._*. La causa raíz nunca cambia: el disco
+externo no es APFS. La solución de fondo sería migrar el proyecto a un
+volumen APFS o al disco interno, pero se ha optado por convivir con el
+problema caso por caso (venv en disco interno, .gitignore, find+delete
+antes de Docker) en vez de migrar todo el proyecto, dado el costo de
+tiempo de hacerlo a mitad de desarrollo.
