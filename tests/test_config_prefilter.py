@@ -76,3 +76,75 @@ def test_config_prefilter_has_meaningful_content_false():
     """Texto corto sin keywords ni IPs (caso real del bug) → False."""
     texto = "es capa 2, no tiene componente capa 3"
     assert ConfigPrefilter().has_meaningful_content(texto) is False
+
+
+def test_prefilter_preserves_full_fortios_policy_block():
+    """Evidencia real FortiOS: el bloque de política completo se conserva.
+
+    Antes, el filtrado línea-a-línea perdía la política 'edit 2' (su línea de
+    apertura y 'set status disable' no tienen keyword propia). Con evaluación
+    por bloque, 'config firewall policy' hace relevante a TODO el bloque.
+    """
+    raw = (
+        "config firewall policy\n"
+        "edit 1\n"
+        'set srcintf "port2"\n'
+        'set dstintf "port1"\n'
+        'set srcaddr "all"\n'
+        'set dstaddr "all"\n'
+        "set action accept\n"
+        'set schedule "always"\n'
+        "next\n"
+        "edit 2\n"
+        'set srcintf "port2"\n'
+        'set dstintf "port1"\n'
+        'set srcaddr "all"\n'
+        'set dstaddr "all"\n'
+        "set action deny\n"
+        "set status disable\n"
+        "next\n"
+        "end"
+    )
+    filtrado = ConfigPrefilter().prefilter(raw, vendor="fortinet")
+
+    # La política 2 completa (con su estado deshabilitado) debe sobrevivir.
+    assert "edit 2" in filtrado
+    assert "status disable" in filtrado
+    # Y la política 1 también, obviamente.
+    assert "edit 1" in filtrado
+
+
+def test_prefilter_cisco_format_unchanged():
+    """Cisco IOS sigue funcionando igual: relevantes se conservan, ruido no."""
+    raw = (
+        "!\n"
+        "interface GigabitEthernet0/0\n"
+        " ip address 10.0.0.1 255.255.255.0\n"
+        " ipv6 address 2001:db8::1/64\n"
+        "!\n"
+        "router bgp 65001\n"
+        "banner motd ^C Hola ^C\n"      # sin keyword ni IP → se descarta
+    )
+    filtrado = ConfigPrefilter().prefilter(raw, vendor="cisco_ios")
+
+    assert "interface GigabitEthernet0/0" in filtrado
+    assert "ip address 10.0.0.1" in filtrado
+    assert "ipv6 address 2001:db8::1/64" in filtrado
+    assert "router bgp 65001" in filtrado
+    assert "banner motd" not in filtrado
+    assert "!" not in filtrado
+
+
+def test_prefilter_discards_irrelevant_full_block():
+    """Un bloque explícito sin ninguna keyword/IP se descarta completo."""
+    raw = (
+        "config system global\n"
+        "set admin-timeout 5\n"
+        "set gui-theme blue\n"
+        "end"
+    )
+    filtrado = ConfigPrefilter().prefilter(raw, vendor="fortinet")
+
+    assert filtrado.strip() == ""
+    assert "config system global" not in filtrado
+    assert "gui-theme" not in filtrado

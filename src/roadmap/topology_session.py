@@ -1,15 +1,21 @@
 """topology_session.py — Flujo conversacional de levantamiento (Módulo 3a).
 
 Contiene :class:`TopologySession`, que orquesta en la terminal el
-levantamiento de la capa 3 y seguridad de la red de un cliente: pregunta el
-perfil (cliente final / ISP) y la topología perimetral, guía al administrador
+levantamiento de los equipos de capa 3 de la red de un cliente: pregunta el
+perfil (cliente final / ISP) y la cantidad de sedes, guía al administrador
 sobre qué comando ejecutar en cada equipo (vía :class:`CommandGuide`), recibe
 el output pegado, lo reduce de forma determinista (:class:`ConfigPrefilter`)
 y lo estructura con el LLM local (:class:`OllamaClient`).
 
+Este módulo se enfoca exclusivamente en identificar y estructurar los equipos
+de capa 3 (firewall o switch core que enrute) y, cuando la capa 3 la cumple un
+switch core, también el firewall complementario de la sede. El contexto
+perimetral (cómo se conecta el firewall al ISP, dispositivos intermedios) se
+capturará en el Módulo 3b, todavía no implementado.
+
 Es un modo de CLI completamente separado del flujo de discovery/clasificación:
 se invoca con ``python main.py --topology`` y captura información que NO es
-descubrible por escaneo de red (rol lógico real, relación firewall↔ISP, etc.).
+descubrible por escaneo de red (rol lógico real, etc.).
 """
 from __future__ import annotations
 
@@ -51,16 +57,16 @@ class TopologySession:
             en disco).
         """
         self._titulo("LEVANTAMIENTO DE TOPOLOGÍA — Módulo 3a")
-        print("Este asistente te guiará para relevar los equipos de capa 3 y "
-              "seguridad de la red.\n")
+        print("Este asistente te guiará para levantar la información de los "
+              "equipos de capa 3 de la red.\n")
         self._aviso_alcance()
 
-        self._capturar_perfil_y_perimetro()
+        self._capturar_perfil()
 
         while True:
             self._capturar_dispositivo()
-            if not self._si_no("¿Quieres agregar otro dispositivo a este "
-                               "levantamiento?"):
+            if not self._si_no("¿Quieres agregar información de otro equipo con "
+                               "función de capa 3 (por ejemplo, de otra sede)?"):
                 break
 
         resultado = self._consolidar()
@@ -74,13 +80,15 @@ class TopologySession:
         print(f"{Style.BRIGHT}Alcance de este levantamiento:{Style.RESET_ALL}")
         print(
             f"{Fore.YELLOW}"
-            "Este levantamiento es para relevar equipos con función de capa 3\n"
-            "(enrutamiento) y/o seguridad perimetral del cliente (routers,\n"
-            "firewalls, equipos con interfaces ruteadas). Si en la topología\n"
-            "existen switches puramente de capa 2 (sin enrutamiento), NO es\n"
-            "necesario relevarlos individualmente aquí — basta con mencionarlos\n"
-            "en la pregunta sobre topología perimetral si son relevantes para\n"
-            "entender cómo se conecta el firewall al proveedor de internet."
+            "Este levantamiento se enfoca en los equipos que cumplen la\n"
+            "función de capa 3 (enrutamiento) de la red: el firewall cuando\n"
+            "también enruta, o el switch core cuando la capa 3 está separada\n"
+            "de la seguridad. Los switches puramente de capa 2 (sin\n"
+            "enrutamiento) NO se levantan aquí.\n"
+            "Por cada equipo se solicitará la marca, el comando de verificación\n"
+            "a ejecutar y su salida, que será procesada por una IA local. Se\n"
+            "levanta un equipo a la vez; al terminar se podrá agregar otro\n"
+            "(por ejemplo, de otra sede)."
             f"{Style.RESET_ALL}"
         )
         print(f"{Fore.YELLOW}{'─' * 60}{Style.RESET_ALL}\n")
@@ -88,52 +96,138 @@ class TopologySession:
     # ------------------------------------------------------------------ #
     #  Etapas
     # ------------------------------------------------------------------ #
-    def _capturar_perfil_y_perimetro(self) -> None:
-        """Pregunta perfil de cliente y topología perimetral (no descubrible)."""
+    def _capturar_perfil(self) -> None:
+        """Pregunta perfil de cliente y cantidad de sedes (no descubribles)."""
         self._subtitulo("Perfil del cliente")
-        opcion = self._preguntar("¿Es un cliente final o un ISP? [1=cliente "
-                                 "final / 2=ISP]").strip()
+        print(f"{Fore.CYAN}El perfil ayuda a interpretar la topología: un ISP "
+              f"y un cliente final tienen necesidades de capa 3 "
+              f"distintas.{Style.RESET_ALL}")
+        opcion = self._preguntar("Indica si es un cliente final o un ISP "
+                                 "[1=cliente final / 2=ISP]").strip()
         tipo_cliente = "isp" if opcion == "2" else "cliente_final"
 
-        self._subtitulo("Topología perimetral")
-        dispositivo_intermedio = None
-        if self._si_no("¿Hay algún dispositivo (IPS u otro) entre el firewall "
-                       "y el proveedor de internet?"):
-            dispositivo_intermedio = self._preguntar(
-                "Indica nombre/tipo del dispositivo intermedio"
-            ).strip()
-
-        conexion_isp = self._preguntar(
-            "¿Cómo se conecta el firewall al ISP? "
-            "(ej: directa, vía router del ISP, etc.)"
-        ).strip()
+        print(f"{Fore.CYAN}La cantidad de sedes da una idea de cuántos equipos "
+              f"de capa 3 podrían tener que levantarse.{Style.RESET_ALL}")
+        cantidad_sedes = self._preguntar_entero_positivo(
+            "Indica cuántas sedes tiene la organización"
+        )
 
         self.sesion_info = {
             "tipo_cliente": tipo_cliente,
-            "dispositivo_intermedio_perimetral": dispositivo_intermedio,
-            "conexion_firewall_isp": conexion_isp,
+            "cantidad_sedes": cantidad_sedes,
             "timestamp_inicio": datetime.now().isoformat(timespec="seconds"),
         }
 
     def _capturar_dispositivo(self) -> None:
-        """Captura y estructura un equipo de red individual."""
-        self._subtitulo(f"Dispositivo #{len(self.dispositivos) + 1}")
+        """Captura uno o más equipos según quién cumpla la función de capa 3.
 
-        # (a) Marca/modelo → familia conocida.
-        entrada = self._preguntar("¿Qué marca/modelo es este equipo de red?")
+        Pregunta primero qué equipo enruta en esta sede/segmento y deriva el
+        flujo: si el firewall es quien enruta, se levanta solo ese equipo; si
+        la capa 3 la cumple un switch core, se levanta el switch y, de forma
+        obligatoria, también el firewall complementario de la sede.
+        """
+        self._subtitulo(f"Equipo de capa 3 #{len(self.dispositivos) + 1}")
+        print(f"{Fore.CYAN}Por favor indica cuál equipo hace las funciones de "
+              f"capa 3 de la red en esta sede o segmento; posteriormente, en "
+              f"otra línea de comando, se solicitará la marca y los comandos "
+              f"de verificación, que serán procesados por una IA "
+              f"local.{Style.RESET_ALL}")
+
+        opcion = self._preguntar_opcion(
+            "¿Qué equipo maneja las funciones de capa 3 en esta sede/segmento?\n"
+            "  [1] Firewall (también es responsable de capa 3)\n"
+            "  [2] Switch core (capa 3 separada de la seguridad)\n"
+            "  [3] Otro equipo",
+            {"1", "2", "3"},
+        )
+
+        if opcion == "1":
+            self._caso_firewall_hace_capa3()
+        elif opcion == "2":
+            self._caso_switch_core_y_firewall()
+        else:
+            self._caso_otro_equipo()
+
+    def _caso_firewall_hace_capa3(self) -> None:
+        """Caso 1: el firewall enruta y cubre la seguridad — un solo equipo."""
+        print(f"{Fore.CYAN}Se levantará el firewall, que en este caso también "
+              f"cumple la función de capa 3 de la red.{Style.RESET_ALL}")
+        entrada = self._preguntar("Indica la marca/modelo del firewall")
+        info = self._procesar_equipo(entrada, preguntar_rol_fallback=False)
+        self.dispositivos.append(info)
+
+    def _caso_switch_core_y_firewall(self) -> None:
+        """Caso 2: el switch core enruta; el firewall se levanta aparte.
+
+        Es obligatorio levantar también el firewall: aunque no enrute, tiene
+        interfaces relevantes (ej. zonas DMZ con servidores) que importan para
+        entender la topología completa de la sede.
+        """
+        print(f"{Fore.CYAN}Primero se levantará el switch core, que es quien "
+              f"cumple la función de capa 3 de la red.{Style.RESET_ALL}")
+        entrada_switch = self._preguntar("Indica la marca/modelo del switch core")
+        info_switch = self._procesar_equipo(entrada_switch,
+                                            preguntar_rol_fallback=False)
+        self.dispositivos.append(info_switch)
+
+        self._subtitulo("Firewall complementario de la sede")
+        print(f"{Fore.CYAN}Dado que la función de capa 3 la cumple el switch "
+              f"core que se acaba de levantar, ahora se levantará la "
+              f"información del firewall de la organización. Aunque no haga "
+              f"enrutamiento dinámico, sí tiene interfaces configuradas "
+              f"relevantes (por ejemplo, zonas DMZ con servidores) que es "
+              f"importante estructurar para entender la topología "
+              f"completa.{Style.RESET_ALL}")
+        entrada_fw = self._preguntar("Indica la marca/modelo del firewall")
+        info_fw = self._procesar_equipo(entrada_fw, preguntar_rol_fallback=False)
+        info_fw["_es_firewall_sin_capa3"] = True
+        self.dispositivos.append(info_fw)
+
+    def _caso_otro_equipo(self) -> None:
+        """Caso 3: otro tipo de equipo de capa 3 — flujo estándar."""
+        print(f"{Fore.CYAN}Indica de qué tipo de equipo se trata para registrar "
+              f"el contexto antes de pedir su marca y comando.{Style.RESET_ALL}")
+        descripcion = self._preguntar(
+            "Describe qué tipo de equipo es (texto libre)"
+        ).strip()
+        entrada = self._preguntar("Indica la marca/modelo del equipo")
+        info = self._procesar_equipo(entrada, preguntar_rol_fallback=True)
+        info["_descripcion_otro"] = descripcion
+        self.dispositivos.append(info)
+
+    def _procesar_equipo(self, entrada: str,
+                         preguntar_rol_fallback: bool) -> dict:
+        """Procesa un equipo: comando → captura → prefiltrado → LLM → resumen.
+
+        Args:
+            entrada: marca/modelo declarado por el administrador.
+            preguntar_rol_fallback: si ``True`` y el LLM no determina el rol
+                lógico, pregunta al administrador si el equipo también hace de
+                firewall. Se usa solo cuando el rol no se conoce de antemano
+                (Caso 3); en los casos 1 y 2 el rol ya quedó definido por la
+                selección inicial.
+
+        Returns:
+            El dict de información del equipo (sin agregar a ``self.dispositivos``).
+        """
         vendor_key = self._match_vendor(entrada)
         print(f"{Fore.CYAN}Familia detectada:{Style.RESET_ALL} {vendor_key}")
 
-        # (b) Comando sugerido, destacado.
+        # (a) Comando sugerido, destacado.
         sugerencia = self.guide.get_command_suggestion(vendor_key)
         self._mostrar_comando(sugerencia)
 
-        # (c) Captura multilínea hasta una línea que diga exactamente "FIN".
+        # (b) Captura multilínea hasta una línea que diga exactamente "FIN".
         print(f"{Style.BRIGHT}Pega aquí el resultado del comando "
               f"(termina con una línea que solo diga FIN):{Style.RESET_ALL}")
+        print(f"{Style.DIM}Si no tienes esta información disponible ahora, o "
+              f"este equipo no aplica (ej: resultó ser de capa 2 sin "
+              f"componente de capa 3), escribe una breve nota explicando la "
+              f"situación y luego FIN — el sistema lo marcará para revisión "
+              f"manual en vez de inventar datos.{Style.RESET_ALL}")
         raw_config = self._leer_multilinea()
 
-        # (d) Pre-filtrado determinista + resumen de reducción.
+        # (c) Pre-filtrado determinista + resumen de reducción.
         filtrado = self.prefilter.prefilter(raw_config, vendor_key)
         reduccion = self.prefilter.estimate_reduction(raw_config, filtrado)
         print(f"\n{Fore.CYAN}Pre-filtrado:{Style.RESET_ALL} "
@@ -141,18 +235,24 @@ class TopologySession:
               f"{reduccion['lineas_filtradas']} líneas "
               f"({reduccion['porcentaje_reduccion']}% de reducción)")
 
-        # (e) Extracción con el LLM local (puede tardar 1-2 minutos).
+        # (d) Extracción con el LLM local (puede tardar 1-2 minutos).
         print(f"\n{Fore.YELLOW}Procesando con el modelo local... "
               f"(esto puede tardar uno o dos minutos){Style.RESET_ALL}")
         info = self.ollama.extract_device_info(
             filtrado, vendor_key, vendor_modelo_declarado=entrada
         )
 
-        # (f) Resumen legible del resultado.
+        # (e) Resumen legible del resultado.
         self._mostrar_resumen_dispositivo(info)
 
-        # (g) Relación de rol firewall si el LLM no la dejó clara.
-        if not info.get("rol_logico") or info.get("rol_logico") == "desconocido":
+        # (f) Relación de rol firewall si el LLM no la dejó clara (solo Caso 3).
+        if preguntar_rol_fallback and (
+            not info.get("rol_logico") or info.get("rol_logico") == "desconocido"
+        ):
+            print(f"{Fore.YELLOW}El análisis automático no pudo determinar con "
+                  f"certeza si este equipo cumple función de firewall a "
+                  f"partir de la configuración proporcionada — esta respuesta "
+                  f"ayuda a completar esa información.{Style.RESET_ALL}")
             resp = self._preguntar(
                 "¿Este mismo equipo también maneja la seguridad (firewall), o "
                 "es un dispositivo separado? [mismo/separado]"
@@ -163,7 +263,7 @@ class TopologySession:
 
         info["_vendor_declarado"] = vendor_key
         info["_entrada_usuario"] = entrada
-        self.dispositivos.append(info)
+        return info
 
     # ------------------------------------------------------------------ #
     #  Consolidación / salida
@@ -194,6 +294,7 @@ class TopologySession:
 
         dispositivos = resultado["dispositivos"]
         total = len(dispositivos)
+        cantidad_sedes = resultado["sesion_levantamiento"].get("cantidad_sedes")
 
         # VLANs totales detectadas (unión de todas las declaradas).
         vlans: set = set()
@@ -207,11 +308,31 @@ class TopologySession:
             if d.get("confianza_extraccion") == "baja"
         ]
 
-        print(f"{Style.BRIGHT}Dispositivos relevados:{Style.RESET_ALL} {total}")
+        if cantidad_sedes is not None:
+            print(f"{Style.BRIGHT}Sedes de la organización:{Style.RESET_ALL} "
+                  f"{cantidad_sedes}")
+        print(f"{Style.BRIGHT}Equipos levantados:{Style.RESET_ALL} {total}")
         print(f"{Style.BRIGHT}VLANs totales detectadas:{Style.RESET_ALL} "
               f"{len(vlans)} {sorted(vlans) if vlans else ''}")
         print(f"{Style.BRIGHT}Requieren revisión manual "
               f"(confianza baja):{Style.RESET_ALL} {len(baja_confianza)}")
+        if baja_confianza:
+            print(f"{Style.DIM}Estos dispositivos necesitan que confirmes "
+                  f"manualmente la información en una fase posterior, ya que "
+                  f"el análisis automático no tuvo suficiente "
+                  f"certeza.{Style.RESET_ALL}")
+
+        # Listado de equipos: el firewall complementario se muestra agrupado
+        # (indentado) bajo el switch core que lo precede en la lista.
+        self._subtitulo("Equipos levantados")
+        for d in dispositivos:
+            etiqueta = d.get("_entrada_usuario", "?")
+            rol = d.get("rol_logico", "—")
+            if d.get("_es_firewall_sin_capa3"):
+                print(f"    └─ Firewall complementario (sin capa 3): "
+                      f"{etiqueta} — {rol}")
+            else:
+                print(f"  • {etiqueta} — {rol}")
 
         if baja_confianza:
             filas = [
@@ -264,6 +385,10 @@ class TopologySession:
         """Muestra el comando sugerido destacado en consola."""
         print()
         print(f"{Fore.GREEN}{'─' * 60}")
+        print(f"{Style.DIM}Este comando extrae solo la información relevante "
+              f"(no el archivo de configuración completo). El resultado se "
+              f"analizará con un modelo de IA que corre localmente en este "
+              f"equipo — nada se envía a internet.{Style.RESET_ALL}")
         print(f"{Style.BRIGHT}Ejecuta en el equipo y pega la salida:"
               f"{Style.RESET_ALL}")
         print(f"{Fore.CYAN}{sugerencia['comando_sugerido']}{Style.RESET_ALL}")
@@ -328,6 +453,32 @@ class TopologySession:
     def _si_no(self, texto: str) -> bool:
         """Pregunta sí/no; devuelve True si la respuesta empieza por 's'."""
         return self._preguntar(f"{texto} [s/n]").strip().lower().startswith("s")
+
+    def _preguntar_entero_positivo(self, texto: str) -> int:
+        """Pregunta un entero positivo; reintenta si la entrada no es válida."""
+        while True:
+            respuesta = self._preguntar(texto).strip()
+            try:
+                valor = int(respuesta)
+            except ValueError:
+                print(f"{Fore.RED}Por favor ingresa un número entero "
+                      f"(ej: 1, 2, 3).{Style.RESET_ALL}")
+                continue
+            if valor <= 0:
+                print(f"{Fore.RED}El número debe ser mayor que cero. Intenta "
+                      f"de nuevo.{Style.RESET_ALL}")
+                continue
+            return valor
+
+    def _preguntar_opcion(self, texto: str, validas: set[str]) -> str:
+        """Pregunta una opción; reintenta hasta recibir un valor permitido."""
+        opciones = "/".join(sorted(validas))
+        while True:
+            respuesta = self._preguntar(texto).strip()
+            if respuesta in validas:
+                return respuesta
+            print(f"{Fore.RED}Respuesta no válida. Indica una de estas "
+                  f"opciones: {opciones}.{Style.RESET_ALL}")
 
     @staticmethod
     def _titulo(texto: str) -> None:
