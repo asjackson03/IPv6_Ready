@@ -402,3 +402,38 @@ volumen APFS o al disco interno, pero se ha optado por convivir con el
 problema caso por caso (venv en disco interno, .gitignore, find+delete
 antes de Docker) en vez de migrar todo el proyecto, dado el costo de
 tiempo de hacerlo a mitad de desarrollo.
+
+## Infraestructura Ollama validada (24-jun-2026)
+
+Contenedor ollama/ollama:latest corriendo vía docker-compose, modelo
+llama3.1:8b descargado (~4.9GB) y funcionando. Validado con:
+
+  curl http://localhost:11434/api/generate -d '{"model":"llama3.1:8b",
+  "prompt":"...", "stream":false}'
+
+Decisión de modelo: llama3.1:8b elegido sobre alternativas por ser
+LOCAL (no "cloud" - el catálogo de Ollama en 2026 mezcla modelos
+verdaderamente locales con modelos cloud de terceros que SÍ envían datos
+a servidores externos, hay que verificar siempre la etiqueta antes de
+elegir uno). Tamaño 8B es el punto óptimo para Mac M1 con 16GB RAM.
+Alternativas de respaldo si la precisión de extracción no es suficiente:
+qwen2.5:7b, phi3.5 (cambio de modelo = cambiar un string, no rediseño).
+
+Lección de performance: primera consulta a un modelo recién cargado tarda
+significativamente más por el costo de carga a memoria (load_duration),
+no por la generación en sí (eval_duration). Medido: 66s totales, de los
+cuales 61s fueron carga y 0.6s generación real. Las consultas siguientes,
+con el modelo ya "caliente" en memoria, son mucho más rápidas. Implicación
+de diseño para el parser de configuración (3a): el pre-filtrado de
+10,000→~1,000 líneas que decidió Andrés no es solo optimización de costo,
+es también optimización de tiempo de respuesta percibido por el usuario.
+
+Troubleshooting de sesión: el comando `docker` dejó de reconocerse en
+TODAS las terminales (VS Code, iTerm, Terminal nativa) a mitad de sesión,
+aunque el binario seguía intacto en
+/Applications/Docker.app/Contents/Resources/bin/docker. Causa más probable:
+symlink roto en una ruta del PATH por defecto (ej. /usr/local/bin/docker),
+posiblemente de una instalación anterior de Docker que Andrés mencionó
+("lo instalé alguna vez pero no lo usé"). Fix aplicado: agregar la ruta
+del binario directamente al PATH en ~/.zshrc:
+  export PATH="/Applications/Docker.app/Contents/Resources/bin:$PATH"
