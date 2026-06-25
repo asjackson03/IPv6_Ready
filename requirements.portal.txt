@@ -1,0 +1,14 @@
+# Dependencias mínimas del contenedor del portal web (Bloque 3 — Streamlit).
+# El portal LEE la base de datos SQLite y, para el chat, llama a Ollama vía
+# HTTP. No necesita nmap, scikit-learn ni FastAPI (es solo lectura + chat).
+#
+# Streamlit se fija a <1.50 a propósito (las 1.50+ dependen de starlette>=0.40,
+# innecesario aquí y fuente de conflictos con el resto del stack del proyecto).
+streamlit==1.41.1
+plotly==5.24.1
+pandas==2.2.0
+sqlalchemy>=2.0,<2.1
+colorama==0.4.6
+# Cliente del LLM local para el chat anclado a datos.
+ollama==0.1.7
+httpx==0.25.2

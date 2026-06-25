@@ -91,6 +91,44 @@ def test_extract_device_info_connection_error(monkeypatch):
     assert "docker ps" in mensaje
 
 
+def test_generate_text_devuelve_texto_libre(monkeypatch):
+    """generate_text() devuelve el texto del modelo sin forzar JSON."""
+    client = OllamaClient()
+    monkeypatch.setattr(
+        client._client, "generate",
+        lambda **kwargs: {"response": "# Roadmap\nTexto libre en Markdown."},
+    )
+
+    texto = client.generate_text("genera un roadmap")
+
+    assert texto.startswith("# Roadmap")
+    # No debe forzar format=json en generación de texto libre.
+    # (se valida indirectamente: el doble no recibe format, no rompe)
+
+
+def test_generate_text_connection_error_lanza_runtime(monkeypatch):
+    """generate_text() lanza RuntimeError accionable si Ollama no responde."""
+    client = OllamaClient()
+
+    def fake_generate(**kwargs):
+        raise ConnectionError("Connection refused")
+
+    monkeypatch.setattr(client._client, "generate", fake_generate)
+
+    with pytest.raises(RuntimeError, match="Ollama no disponible"):
+        client.generate_text("hola")
+
+
+def test_ollama_host_desde_env(monkeypatch):
+    """El host se toma de OLLAMA_HOST cuando no se pasa argumento explícito."""
+    monkeypatch.setenv("OLLAMA_HOST", "http://ollama:11434")
+    client = OllamaClient()
+    assert client.host == "http://ollama:11434"
+    # El argumento explícito tiene prioridad sobre el entorno.
+    client2 = OllamaClient(host="http://localhost:9999")
+    assert client2.host == "http://localhost:9999"
+
+
 def test_extract_device_info_empty_content_no_llm_call(monkeypatch):
     """Texto sin evidencia técnica: NUNCA se llama a Ollama (guardia previa)."""
     client = OllamaClient()

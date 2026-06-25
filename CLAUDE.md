@@ -700,3 +700,80 @@ Módulo 3b: chat conversacional para información que NO es extraíble de
 un archivo de configuración (contexto organizacional, topología
 perimetral, criticidad de negocio). Diseño conceptual ya existe en
 secciones anteriores de este archivo; falta concretar la implementación.
+
+## Cierre de entrega final — 25-jun-2026 (sesión nocturna desatendida)
+
+Sesión de integración construida en 4 bloques sobre la rama
+`entrega_final_v1` (creada desde develop). Commit + push tras cada bloque.
+Suite final: **61 tests en verde** (55 tras Bloque 2/3, +6 de refuerzo al
+cerrar). No se necesitó BLOQUEOS.md: no hubo bloqueos sin resolver.
+
+### Bloque 1 — Base de datos (SQLite + SQLAlchemy)
+`src/database/`: `models.py` (Device, Scan, TopologyDevice, TopologySession,
+Roadmap), `db.py` (engine SQLite `data/ipv6_analyzer.db` + `init_db()`),
+`importer.py` (`DataImporter`: importa `data/raw/*.json` del Módulo 1 y
+`data/processed/topology_session_*.json` del Módulo 3a). Mapeo device_type →
+7 categorías del inventario de campo + criticidad alta/baja según las reglas
+ya definidas en este archivo. Campos anidados de topología guardados como
+JSON serializado (decisión explícita: no re-normalizar, no aporta a un
+dashboard de solo lectura). Flag `main.py --init-db`. Validado: importó 13
+scans / 119 devices / 7 sesiones / 10 equipos de capa 3.
+
+### Bloque 2 — Módulo 3c (generador de roadmap RAG + Ollama)
+`src/roadmap/rag_knowledge_base.py`: recuperación TF-IDF (scikit-learn, ya
+presente por el Módulo 2) + similitud de coseno sobre
+`data/sample/knowledge_base/` (10 fragmentos .txt SINTÉTICOS escritos a mano:
+Cisco IOS-XE dual-stack, IOS 12.x legacy, FortiOS policies, licenciamiento L3
+sin IPv6, RA/SLAAC, IPoE vs PPPoE, prefijos /48 vs /44, ArubaOS-CX, NAT≠
+seguridad, estrategias de transición). Decisión explícita: NO datasheets
+reales por PDF (trabajo futuro), se valida la ARQUITECTURA RAG.
+`roadmap_generator.py`: `RoadmapGenerator` combina discovery + ML + topología
+(BD) + RAG y genera Markdown con Ollama. Doble capa (mismo patrón que los 6
+bugs del 3a): prompt "no inventar fuera del contexto" + validación
+determinista `_anexar_criticos_omitidos()` que añade un anexo si el modelo no
+citó por nombre/IP a algún equipo crítico. `OllamaClient.generate_text()`
+(texto libre, no JSON) + host configurable por `OLLAMA_HOST`. Flag
+`--generate-roadmap`. Validado end-to-end con Ollama real: el roadmap cita los
+equipos críticos reales por nombre/IP, usa la distribución real y el perfil de
+topología, e incorpora conocimiento del RAG (riesgo IOS 12.x). Bug encontrado
+y corregido: el preview en consola leía un objeto ORM ya desacoplado tras
+cerrar la sesión (DetachedInstanceError) — se captura el string antes de
+cerrar.
+
+### Bloque 3 — Portal web (Streamlit, solo lectura)
+`src/portal/app.py` (4 vistas: Resumen ejecutivo, Topología, Roadmap, Chat) +
+`data_access.py` (capa de lectura que devuelve estructuras planas cacheables).
+Diseño cuidado por requisito explícito: layout wide, métricas en tarjetas,
+gráficas Plotly (dona de estado IPv6, barras por categoría/criticidad, ML),
+tabla filtrable, tema azul propio (`.streamlit/config.toml`, paleta
+#1F4E79/#2E75B6 del TFM). El firewall complementario se muestra indentado bajo
+su switch core (igual que el CLI). El chat ancla cada pregunta al roadmap +
+resumen de BD (no conversación libre) y avisa si no hay roadmap o si Ollama no
+responde. Validado: arranca headless (health=ok, sin traceback); data_access
+consulta la BD real.
+
+CONFLICTO DE DEPENDENCIAS RESUELTO (importante para el futuro): Streamlit
+≥1.50 migró su servidor de tornado a starlette≥0.40, lo que choca con
+`fastapi==0.110` (Módulo 2, exige starlette<0.37) y arrastraría httpx fuera
+del pin <0.26 que necesita `ollama==0.1.7`. Solución: fijar `streamlit==1.41.1`
+(rama basada en tornado, sin dependencia de starlette). Pin documentado en
+`requirements.txt` y `requirements.portal.txt`.
+
+### Bloque 4 — Docker + documentación
+`Dockerfile.portal` + `requirements.portal.txt` + servicio `portal` en
+`docker-compose.yml` (puerto 8501, monta `./data`, `OLLAMA_HOST` apunta al
+servicio `ollama`). `docker compose config` válido con los 3 servicios
+(classifier + ollama + portal). README actualizado con la arquitectura
+completa (4 módulos + BD + portal) y la demo de principio a fin
+(`--demo --train --classify` → `--topology` → `--init-db` →
+`--generate-roadmap` → `streamlit run`).
+
+### Decisiones de diseño tomadas en esta sesión
+- SQLite + SQLAlchemy (no Postgres) según lo ya acordado; campos anidados como
+  JSON, no normalizados.
+- RAG sintético a mano (PDFs reales = trabajo futuro).
+- Portal Streamlit con theming custom; SOLO LECTURA (no dispara acciones).
+- `streamlit<1.50` por compatibilidad de stack (ver conflicto arriba).
+- Cambios mínimos y aditivos a módulos validados: solo `OllamaClient`
+  (nuevo `generate_text()` + host por entorno, retrocompatible). Suite
+  completa re-verificada en verde tras cada cambio.

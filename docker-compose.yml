@@ -1,5 +1,6 @@
-# docker-compose.yml — Orquestación del Módulo 2 (Classifier ML) y la base
-# para el Módulo 3 (LLM local con Ollama).
+# docker-compose.yml — Orquestación de los servicios containerizados:
+#   · classifier (Módulo 2, API ML)   · ollama (LLM local, Módulos 3a/3c/chat)
+#   · portal     (Bloque 3, Streamlit, dashboard de solo lectura)
 #
 # El Módulo 1 (escaneo con nmap) NO está aquí: corre nativo en el host porque
 # necesita acceso de bajo nivel a la red. Ver README para el flujo completo.
@@ -25,10 +26,10 @@ services:
       start_period: 10s
 
   # ---------------------------------------------------------------------------
-  # Servicio Ollama (LLM local) — BASE PARA EL MÓDULO 3, aún sin implementar.
-  # En el Módulo 3 alimentará el parser de configuración (show run) y el chat
-  # conversacional. Aquí solo queda DEFINIDO: NO se hace pull de modelos ni se
-  # arranca en esta fase. Configuración básica de CPU (sin GPU) a propósito.
+  # Servicio Ollama (LLM local) — usado por el Módulo 3a (parser de
+  # configuración), el Módulo 3c (generación de roadmap) y el chat del portal.
+  # Tras el primer arranque hay que descargar el modelo una vez:
+  #   docker exec -it ipv6-ollama ollama pull llama3.1:8b
   # ---------------------------------------------------------------------------
   ollama:
     image: ollama/ollama:latest
@@ -38,6 +39,29 @@ services:
     volumes:
       # Volumen nombrado para no re-descargar los modelos en cada rebuild.
       - ollama_models:/root/.ollama
+
+  # ---------------------------------------------------------------------------
+  # Portal web (Bloque 3) — dashboard Streamlit de solo lectura. Lee la BD
+  # SQLite montada desde ./data y usa el servicio ollama para el chat. NO
+  # dispara escaneos/levantamientos/generación: eso se hace desde la CLI.
+  # ---------------------------------------------------------------------------
+  portal:
+    build:
+      context: .
+      dockerfile: Dockerfile.portal
+    image: ipv6-ready-portal:latest
+    container_name: ipv6-portal
+    ports:
+      - "8501:8501"
+    volumes:
+      # Monta ./data para leer la BD generada en el host (python main.py
+      # --init-db). El portal es solo lectura sobre esos datos.
+      - ./data:/app/data
+    environment:
+      # Dentro de la red de compose, Ollama es accesible por nombre de servicio.
+      - OLLAMA_HOST=http://ollama:11434
+    depends_on:
+      - ollama
 
 volumes:
   ollama_models:

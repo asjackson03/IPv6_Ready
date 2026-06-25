@@ -1,0 +1,35 @@
+# Dockerfile.portal — Contenedor del portal web (Bloque 3 — Streamlit).
+#
+# Dashboard de SOLO LECTURA sobre la base de datos SQLite del proyecto. El
+# chat llama al servicio Ollama (otro contenedor) vía HTTP. No incluye nmap
+# ni scikit-learn: no escanea ni clasifica, solo presenta resultados.
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# 1) Dependencias (capa cacheable).
+COPY requirements.portal.txt ./requirements.portal.txt
+RUN pip install --no-cache-dir -r requirements.portal.txt
+
+# 2) Código necesario: el portal (src.portal), la capa de BD (src.database) y
+#    el cliente Ollama (src.roadmap.ollama_client) para el chat. Se copia el
+#    __init__ de src y src.roadmap para que los imports de paquete funcionen.
+COPY src/__init__.py ./src/__init__.py
+COPY src/database/ ./src/database/
+COPY src/portal/ ./src/portal/
+COPY src/roadmap/__init__.py ./src/roadmap/__init__.py
+COPY src/roadmap/ollama_client.py ./src/roadmap/ollama_client.py
+COPY src/roadmap/config_prefilter.py ./src/roadmap/config_prefilter.py
+COPY src/roadmap/command_guide.py ./src/roadmap/command_guide.py
+COPY .streamlit/ ./.streamlit/
+
+# El chat dentro del contenedor debe apuntar al servicio 'ollama' de la red
+# de compose, no a localhost (que sería el propio contenedor del portal).
+ENV OLLAMA_HOST=http://ollama:11434
+
+EXPOSE 8501
+
+# La base de datos vive en /app/data (montada como volumen, ver compose).
+CMD ["streamlit", "run", "src/portal/app.py", \
+     "--server.address=0.0.0.0", "--server.port=8501", \
+     "--server.headless=true"]

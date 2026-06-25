@@ -188,6 +188,42 @@ def test_import_topology_json(tmp_path, session):
     assert "OSPF" in switch.enrutamiento["protocolos_detectados"]
 
 
+def test_topology_device_json_properties_defaults(session):
+    """Las propiedades JSON devuelven defaults vacíos si la columna es None."""
+    ses = TopologySession(tipo_cliente="cliente_final", cantidad_sedes=1)
+    # Equipo sin ningún campo JSON poblado (columnas None).
+    ses.devices.append(TopologyDevice(rol_logico="desconocido"))
+    session.add(ses)
+    session.commit()
+
+    d = session.query(TopologyDevice).one()
+    assert d.interfaces == []
+    assert d.vlans_detectadas == []
+    assert d.dhcp == {}
+    assert d.politicas == {}
+    assert d.notas_ambiguedad == []
+    assert d.es_firewall_sin_capa3 is False  # default de columna
+
+
+def test_import_scan_modo_target_y_timestamp(tmp_path, session):
+    """Un scan sin source=mock_data se marca modo='target' y parsea timestamp."""
+    devices = [{
+        "ip": "10.0.0.1", "hostname": "real-host", "device_type": "router",
+        "vendor": "Cisco", "os_detected": "IOS-XE", "ipv6_score": 90,
+        "ipv6_status": "COMPATIBLE", "source": "nmap_scan",
+    }]
+    filepath = tmp_path / "ipv6_scan_20260622_121932.json"
+    filepath.write_text(json.dumps(devices), encoding="utf-8")
+
+    importer = DataImporter(session=session)
+    scan = importer.import_scan_json(str(filepath))
+
+    assert scan.modo == "target"  # source != mock_data
+    assert scan.timestamp.year == 2026 and scan.timestamp.month == 6
+    assert scan.timestamp.day == 22
+    assert scan.target == "10.0.0.0/24"  # /24 inferido de la primera IP
+
+
 def test_import_all_handles_bad_file(tmp_path, session, monkeypatch):
     """Un archivo corrupto no aborta el import del resto; queda en errores."""
     import src.database.importer as importer_mod

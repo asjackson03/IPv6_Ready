@@ -72,6 +72,13 @@ def test_rag_search_query_vacia_devuelve_vacio():
     assert kb.search("", top_k=3) == []
 
 
+def test_rag_search_respeta_top_k():
+    """search() nunca devuelve más fragmentos que top_k."""
+    kb = RAGKnowledgeBase()
+    resultados = kb.search("IPv6 dual-stack Cisco Fortinet switch router", top_k=2)
+    assert len(resultados) <= 2
+
+
 def test_generate_guarda_roadmap_en_bd(session, scan_sembrado):
     """El roadmap generado se persiste en la tabla roadmaps, asociado al scan."""
     fake = FakeOllama(

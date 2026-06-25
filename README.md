@@ -163,6 +163,71 @@ curl -X POST http://localhost:8000/classify \
 docker-compose down
 ```
 
+## Arquitectura completa (Módulos 1–4 + Base de datos + Portal)
+
+La entrega final integra los cuatro módulos sobre una base de datos común y un
+portal web de visualización:
+
+```
+            CLI (main.py, nativo)                       Portal (Streamlit)
+ ┌───────────┐  ┌───────────┐  ┌──────────────┐         ┌──────────────────┐
+ │ MÓDULO 1  │  │ MÓDULO 2  │  │  MÓDULO 3     │         │   PORTAL WEB     │
+ │ Discovery │  │ Classifier│  │ 3a topología  │         │  (solo lectura)  │
+ │  (nmap)   │  │   (ML)    │  │ 3c roadmap    │         │  4 vistas +      │
+ │           │  │           │  │ (RAG+Ollama)  │         │  chat local      │
+ └─────┬─────┘  └─────┬─────┘  └──────┬───────┘         └────────┬─────────┘
+       │ JSON         │ ml_*          │ topology_*.json          │ lee
+       ▼              ▼               ▼                          ▼
+   ┌───────────────────────────────────────────────────────────────────┐
+   │            BASE DE DATOS  SQLite  (src/database/, --init-db)        │
+   │  scans · devices · topology_sessions · topology_devices · roadmaps │
+   └───────────────────────────────────────────────────────────────────┘
+```
+
+- **Módulo 1 (Discovery)** y **Módulo 3a (topología)** se ejecutan de forma
+  nativa (acceso a red / chat interactivo) y escriben JSON en `data/`.
+- **`--init-db`** importa todo ese JSON a la base de datos SQLite.
+- **Módulo 3c (`--generate-roadmap`)** combina los datos de la BD con una base
+  de conocimiento RAG y el LLM local (Ollama) para producir el roadmap.
+- El **portal** (Módulo 4) lee la BD y presenta resumen ejecutivo, topología,
+  roadmap y un chat anclado a los datos reales.
+
+### Demo de principio a fin
+
+```bash
+# (0) Tener Ollama corriendo con el modelo (una sola vez):
+docker-compose up -d ollama
+docker exec -it ipv6-ollama ollama pull llama3.1:8b
+
+# (1) Generar datos de diagnóstico (modo demo, sin red real):
+python main.py --demo --train --classify
+
+# (2) (Opcional) Levantamiento de topología guiado por IA local:
+python main.py --topology
+
+# (3) Inicializar la base de datos e importar todo lo generado:
+python main.py --init-db
+
+# (4) Generar el roadmap de migración (usa Ollama, tarda 1-2 min):
+python main.py --generate-roadmap
+
+# (5) Abrir el portal web:
+streamlit run src/portal/app.py
+#     → http://localhost:8501
+```
+
+> El portal también puede levantarse en contenedor: `docker-compose up --build
+> portal` (lee `./data`, monta la BD generada en el paso 3 y usa el servicio
+> `ollama` para el chat).
+
+### Flags de la CLI (entrega final)
+
+| Argumento            | Descripción                                              |
+|----------------------|---------------------------------------------------------|
+| `--init-db`          | Crea la BD SQLite e importa `data/raw` + `data/processed`. |
+| `--generate-roadmap` | Genera el roadmap (BD + RAG + Ollama) y lo guarda en la BD. |
+| `--topology`         | Levantamiento conversacional de topología (Módulo 3a).  |
+
 ## Estructura del proyecto
 
 ```
@@ -173,37 +238,41 @@ TFM/
 ├── README.md
 ├── requirements.txt
 ├── requirements.classifier.txt   # deps mínimas del contenedor del Módulo 2
+├── requirements.portal.txt       # deps mínimas del contenedor del portal
 ├── Dockerfile.classifier         # imagen del Módulo 2 (ML + API)
-├── docker-compose.yml            # classifier + ollama (base Módulo 3)
+├── Dockerfile.portal             # imagen del portal (Streamlit)
+├── docker-compose.yml            # classifier + ollama + portal
+├── .streamlit/config.toml        # tema visual del portal
 ├── setup.py
 ├── main.py
 ├── src/
 │   ├── __init__.py
-│   ├── discovery/
-│   │   ├── __init__.py
-│   │   ├── scanner.py
-│   │   ├── ipv6_checker.py
-│   │   └── inventory.py
-│   ├── classifier/
-│   │   ├── __init__.py
-│   │   ├── feature_extractor.py
-│   │   ├── model_trainer.py
-│   │   ├── predictor.py
-│   │   └── api.py                # API REST (FastAPI) del Módulo 2
-│   ├── roadmap/__init__.py
+│   ├── discovery/                # Módulo 1
+│   │   ├── scanner.py · ipv6_checker.py · inventory.py
+│   ├── classifier/               # Módulo 2 (ML + API FastAPI)
+│   │   ├── feature_extractor.py · model_trainer.py · predictor.py · api.py
+│   ├── roadmap/                  # Módulo 3 (3a topología + 3c roadmap)
+│   │   ├── command_guide.py · config_prefilter.py · ollama_client.py
+│   │   ├── topology_session.py   # 3a — levantamiento conversacional
+│   │   ├── rag_knowledge_base.py # 3c — recuperación RAG (TF-IDF)
+│   │   └── roadmap_generator.py  # 3c — generación del roadmap
+│   ├── database/                 # Base de datos (SQLite + SQLAlchemy)
+│   │   ├── db.py · models.py · importer.py
+│   ├── portal/                   # Portal web (Streamlit, solo lectura)
+│   │   ├── app.py · data_access.py
 │   └── dashboard/__init__.py
 ├── data/
-│   ├── raw/.gitkeep
-│   ├── processed/.gitkeep
+│   ├── raw/.gitkeep              # JSON de scans (Módulo 1)
+│   ├── processed/.gitkeep        # topología (3a) + modelo ML + ipv6_analyzer.db
 │   └── sample/
-│       ├── mock_devices.json
-│       └── training_dataset.json # dataset de entrenamiento del Módulo 2
-├── tests/
-│   ├── __init__.py
-│   ├── test_discovery.py
-│   └── test_api.py
-└── docs/
-    └── architecture.md
+│       ├── mock_devices.json · training_dataset.json
+│       └── knowledge_base/       # corpus RAG sintético (10 fragmentos .txt)
+├── tests/                        # 55 tests (pytest)
+│   ├── test_discovery.py · test_api.py · test_command_guide.py
+│   ├── test_config_prefilter.py · test_ollama_client.py
+│   ├── test_topology_session.py · test_database.py
+│   └── test_roadmap_generator.py
+└── docs/architecture.md
 ```
 
 ## Estado del desarrollo
@@ -212,8 +281,16 @@ TFM/
 |------------------------|-------------------|-------------|
 | Módulo 1 — Discovery   | ✅ Completado     | Escaneo/carga, evaluación IPv6, inventario y reporte. |
 | Módulo 2 — Classifier  | ✅ Completado     | Clasificación ML (Random Forest) en LISTO/ACTUALIZABLE/REEMPLAZAR/EVALUAR + API REST (FastAPI) containerizada. |
-| Módulo 3 — Roadmap     | 🔄 En desarrollo  | Hoja de ruta de migración IPv6. |
-| Módulo 4 — Dashboard   | 🔄 En desarrollo  | Visualización interactiva e informes. |
+| Módulo 3 — Roadmap     | ✅ Completado     | 3a: levantamiento de topología con IA local (`--topology`). 3c: generación de roadmap RAG + Ollama (`--generate-roadmap`). 3b (chat de contexto perimetral): pendiente. |
+| Base de datos          | ✅ Completado     | SQLite + SQLAlchemy; importa scans y topología (`--init-db`). |
+| Módulo 4 — Portal      | ✅ Completado     | Dashboard Streamlit de solo lectura: resumen, topología, roadmap y chat local. |
+
+> **Limitaciones conocidas de esta versión:** la base de conocimiento RAG usa
+> fragmentos técnicos **sintéticos** escritos a mano (no datasheets reales de
+> fabricantes vía PDF — queda como trabajo futuro). El Módulo 3b (chat de
+> contexto perimetral/organizacional no derivable de configuración) está
+> diseñado pero no implementado. El portal es de **solo lectura**: no dispara
+> escaneos, levantamientos ni la generación del roadmap (eso se hace por CLI).
 
 ## Pruebas
 
