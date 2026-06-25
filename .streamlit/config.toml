@@ -1,0 +1,18 @@
+# Tema visual del portal IPv6 Ready Analyzer.
+# Paleta coherente con la identidad del documento TFM (azules corporativos
+# #1F4E79 oscuro y #2E75B6 medio). No usar el tema default de Streamlit:
+# requisito explícito de presentación cuidada para la demo.
+
+[theme]
+base = "light"
+primaryColor = "#2E75B6"           # azul medio — acentos, botones, foco
+backgroundColor = "#FFFFFF"        # fondo principal
+secondaryBackgroundColor = "#EAF1F8"  # azul muy claro — tarjetas, sidebar
+textColor = "#1F2A37"              # gris azulado oscuro para buena lectura
+font = "sans serif"
+
+[server]
+headless = true
+
+[browser]
+gatherUsageStats = false

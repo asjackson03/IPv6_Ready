@@ -18,5 +18,10 @@ pytest==7.4.4
 # Bloque 1 — Base de datos (SQLite + ORM).
 sqlalchemy>=2.0,<2.1
 # Bloque 3 — Portal web (Streamlit + gráficas Plotly).
-streamlit>=1.30,<2.0
+# Streamlit se fija a <1.50 a propósito: las versiones 1.50+ migraron su
+# servidor de tornado a starlette>=0.40, lo que choca con fastapi==0.110
+# (Módulo 2, requiere starlette<0.37) y arrastraría httpx fuera del pin
+# <0.26 que necesita ollama 0.1.7. La rama 1.41.x usa tornado y convive sin
+# conflicto con el resto del stack.
+streamlit>=1.30,<1.50
 plotly>=5.18,<6.0
