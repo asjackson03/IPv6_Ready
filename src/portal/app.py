@@ -98,6 +98,16 @@ def _devices(scan_id: int) -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False)
+def _devices_consolidados() -> pd.DataFrame:
+    return da.devices_consolidados()
+
+
+@st.cache_data(show_spinner=False)
+def _stats_consolidacion() -> dict:
+    return da.stats_consolidacion()
+
+
+@st.cache_data(show_spinner=False)
 def _topo_sessions():
     return da.listar_topology_sessions()
 
@@ -142,12 +152,20 @@ def pagina_resumen() -> None:
         st.info("No hay scans importados en la base de datos todavía.")
         return
 
-    etiquetas = {sc["etiqueta"]: sc["id"] for sc in scans}
-    elegido = st.selectbox("Escaneo a visualizar", list(etiquetas.keys()))
-    scan_id = etiquetas[elegido]
-    df = _devices(scan_id)
+    # --- Vista consolidada (principal) ------------------------------------ #
+    stats = _stats_consolidacion()
+    n_scans = stats["n_scans"]
+    n_unicos = stats["n_unicos"]
+    st.info(
+        f"Esta vista consolida todos los escaneos realizados, mostrando cada "
+        f"dispositivo una sola vez según su detección más reciente. "
+        f"Se registraron **{n_scans} escaneos** en total sobre "
+        f"**{n_unicos} dispositivos únicos**."
+    )
+
+    df = _devices_consolidados()
     if df.empty:
-        st.info("El escaneo seleccionado no tiene dispositivos.")
+        st.info("No hay dispositivos en la base de datos.")
         return
 
     total = len(df)
@@ -158,7 +176,7 @@ def pagina_resumen() -> None:
 
     # Tarjetas de métricas clave.
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Dispositivos", total)
+    c1.metric("Dispositivos únicos", total)
     c2.metric("Compatibles IPv6", f"{n_compatible}",
               f"{n_compatible / total * 100:.0f}% del total")
     c3.metric("Parciales", f"{n_parcial}",
@@ -185,8 +203,33 @@ def pagina_resumen() -> None:
 
     st.divider()
     st.subheader("Inventario detallado")
-    st.caption("Ordenable y filtrable: haz clic en las cabeceras de columna.")
+    st.caption(
+        "Ordenable y filtrable: haz clic en las cabeceras de columna. "
+        "Las columnas 'Visto', 'Primera/Última detección' reflejan la "
+        "historia de detección a través de todos los escaneos."
+    )
     st.dataframe(df, use_container_width=True, hide_index=True)
+
+    # --- Historial por escaneo individual (colapsado por defecto) --------- #
+    with st.expander(
+        "🔍 Ver un escaneo específico del historial (modo detallado)",
+        expanded=False,
+    ):
+        st.caption(
+            "Vista cruda de un único escaneo, sin consolidar. Útil para "
+            "auditar el estado de la red en una fecha/hora concreta."
+        )
+        etiquetas = {sc["etiqueta"]: sc["id"] for sc in scans}
+        elegido = st.selectbox(
+            "Escaneo a visualizar",
+            list(etiquetas.keys()),
+            key="selectbox_scan_historico",
+        )
+        df_hist = _devices(etiquetas[elegido])
+        if df_hist.empty:
+            st.info("El escaneo seleccionado no tiene dispositivos.")
+        else:
+            st.dataframe(df_hist, use_container_width=True, hide_index=True)
 
 
 def _grafica_estado(df: pd.DataFrame) -> None:
@@ -247,11 +290,24 @@ def pagina_topologia() -> None:
                 "`python main.py --init-db`.")
         return
 
-    etiquetas = {s["etiqueta"]: s["id"] for s in sesiones}
-    elegido = st.selectbox("Sesión de levantamiento", list(etiquetas.keys()))
-    session_id = etiquetas[elegido]
+    # Por defecto muestra la sesión más reciente (ya viene ordenada desc por id).
+    sesion_reciente = sesiones[0]
+    n_total = len(sesiones)
+    session_id = sesion_reciente["id"]
+
+    if n_total > 1:
+        st.info(
+            f"Mostrando el levantamiento más reciente de **{n_total} sesiones** "
+            f"registradas (las anteriores fueron iteraciones de prueba del mismo "
+            f"levantamiento). Usa el desplegable inferior para ver el historial."
+        )
+
     info = da.info_topology_session(session_id)
     equipos = _topo_equipos(session_id)
+
+    ts_ref = info.get("timestamp_fin") or info.get("timestamp_inicio")
+    if ts_ref:
+        st.caption(f"Actualizado por última vez: {ts_ref}")
 
     c1, c2, c3 = st.columns(3)
     c1.metric("Perfil de cliente", (info.get("tipo_cliente") or "?").replace("_", " "))
@@ -260,10 +316,34 @@ def pagina_topologia() -> None:
 
     st.divider()
     for eq in equipos:
-        _tarjeta_equipo(eq)
+        _tarjeta_equipo(eq, key_prefix=f"main{session_id}_")
+
+    # Historial de sesiones anteriores (colapsado por defecto).
+    if n_total > 1:
+        with st.expander(
+            f"🔍 Ver otra sesión del historial ({n_total} en total)",
+            expanded=False,
+        ):
+            etiquetas = {s["etiqueta"]: s["id"] for s in sesiones}
+            elegido = st.selectbox(
+                "Sesión de levantamiento",
+                list(etiquetas.keys()),
+                key="selectbox_topo_historico",
+            )
+            sid_hist = etiquetas[elegido]
+            info_hist = da.info_topology_session(sid_hist)
+            equipos_hist = _topo_equipos(sid_hist)
+            ch1, ch2, ch3 = st.columns(3)
+            ch1.metric("Perfil de cliente",
+                       (info_hist.get("tipo_cliente") or "?").replace("_", " "))
+            ch2.metric("Sedes declaradas", info_hist.get("cantidad_sedes") or "—")
+            ch3.metric("Equipos de capa 3", len(equipos_hist))
+            st.divider()
+            for eq in equipos_hist:
+                _tarjeta_equipo(eq, key_prefix=f"hist{sid_hist}_")
 
 
-def _tarjeta_equipo(eq: dict) -> None:
+def _tarjeta_equipo(eq: dict, key_prefix: str = "") -> None:
     # El firewall complementario se muestra indentado/anidado bajo su switch
     # core (mismo criterio visual que el CLI).
     es_fw = eq.get("es_firewall_sin_capa3")
@@ -298,7 +378,17 @@ def _tarjeta_equipo(eq: dict) -> None:
 
         interfaces = eq.get("interfaces") or []
         if interfaces:
-            with st.expander(f"Ver {len(interfaces)} interfaz(es)"):
+            # Causa raíz de StreamlitDuplicateElementKey: _tarjeta_equipo() se
+            # llama dos veces en la misma ejecución del script — una fuera del
+            # expander de historial (sesión más reciente) y otra dentro, porque
+            # el selectbox defaultea a esa misma sesión. El prefijo por call site
+            # (f"main{session_id}_" / f"hist{sid_hist}_") garantiza unicidad incluso
+            # si el usuario elige explícitamente la misma sesión en el historial.
+            mostrar_ifaces = st.checkbox(
+                f"Ver {len(interfaces)} interfaz(es)",
+                key=f"ifaces_{key_prefix}{eq.get('id', id(eq))}",
+            )
+            if mostrar_ifaces:
                 st.dataframe(pd.DataFrame(interfaces), use_container_width=True,
                              hide_index=True)
 

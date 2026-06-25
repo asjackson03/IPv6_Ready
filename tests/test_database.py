@@ -224,6 +224,147 @@ def test_import_scan_modo_target_y_timestamp(tmp_path, session):
     assert scan.target == "10.0.0.0/24"  # /24 inferido de la primera IP
 
 
+from src.portal.data_access import _mac_normalizada, devices_consolidados, stats_consolidacion
+
+
+def test_mac_normalizada_devuelve_none_para_valores_no_identificativos():
+    """MACs desconocidas/vacías deben normalizarse a None."""
+    assert _mac_normalizada(None) is None
+    assert _mac_normalizada("") is None
+    assert _mac_normalizada("desconocido") is None
+    assert _mac_normalizada("unknown") is None
+    assert _mac_normalizada("DESCONOCIDO") is None  # case-insensitive
+    assert _mac_normalizada("00:00:00:00:00:00") is None
+
+
+def test_mac_normalizada_convierte_a_mayusculas():
+    """Una MAC real debe devolverse en mayúsculas."""
+    assert _mac_normalizada("aa:bb:cc:dd:ee:ff") == "AA:BB:CC:DD:EE:FF"
+    assert _mac_normalizada("00:1A:2B:3C:4D:01") == "00:1A:2B:3C:4D:01"
+
+
+def test_devices_consolidados_agrupa_mismo_dispositivo(tmp_path, session):
+    """El mismo (ip, mac) en dos scans distintos produce una sola fila."""
+    from datetime import datetime
+
+    scan1 = Scan(target="192.168.1.0/24", modo="demo",
+                 timestamp=datetime(2026, 6, 1, 10, 0))
+    scan1.devices.append(Device(
+        ip="192.168.1.1", mac="AA:BB:CC:DD:EE:01",
+        hostname="rtr-v1", device_type="router", vendor="Cisco",
+        ipv6_score=80, ipv6_status="COMPATIBLE",
+        categoria="equipos_red_seguridad", criticidad="alta",
+    ))
+    scan2 = Scan(target="192.168.1.0/24", modo="demo",
+                 timestamp=datetime(2026, 6, 2, 10, 0))
+    scan2.devices.append(Device(
+        ip="192.168.1.1", mac="AA:BB:CC:DD:EE:01",
+        hostname="rtr-v2", device_type="router", vendor="Cisco",
+        ipv6_score=90, ipv6_status="COMPATIBLE",
+        categoria="equipos_red_seguridad", criticidad="alta",
+    ))
+    session.add_all([scan1, scan2])
+    session.commit()
+
+    df = devices_consolidados(session)
+    assert len(df) == 1
+    # La versión más reciente (scan2) es la que debe aparecer.
+    assert df.iloc[0]["Hostname"] == "rtr-v2"
+    assert df.iloc[0]["Score IPv6"] == 90
+
+
+def test_devices_consolidados_veces_visto_y_fechas(tmp_path, session):
+    """veces_visto refleja cuántos scans detectaron el dispositivo."""
+    from datetime import datetime
+
+    for i, ts in enumerate([
+        datetime(2026, 6, 1), datetime(2026, 6, 2), datetime(2026, 6, 3)
+    ]):
+        sc = Scan(target="10.0.0.0/24", modo="demo", timestamp=ts)
+        sc.devices.append(Device(
+            ip="10.0.0.1", mac="11:22:33:44:55:66",
+            hostname=f"host-{i}", device_type="server",
+            ipv6_score=70, ipv6_status="PARCIAL",
+            categoria="servidores", criticidad="alta",
+        ))
+        session.add(sc)
+    session.commit()
+
+    df = devices_consolidados(session)
+    assert len(df) == 1
+    assert df.iloc[0]["Visto"] == 3
+    assert df.iloc[0]["Primera detección"] == "2026-06-01 00:00"
+    assert df.iloc[0]["Última detección"] == "2026-06-03 00:00"
+
+
+def test_devices_consolidados_mac_desconocida_agrupa_por_ip(session):
+    """Dispositivos con mac='desconocido' se agrupan solo por IP."""
+    from datetime import datetime
+
+    for i, ts in enumerate([datetime(2026, 6, 1), datetime(2026, 6, 2)]):
+        sc = Scan(target="10.0.0.0/24", modo="demo", timestamp=ts)
+        sc.devices.append(Device(
+            ip="10.0.0.5", mac="desconocido",
+            hostname=f"pc-{i}", device_type="desconocido",
+            ipv6_score=50, ipv6_status="PARCIAL",
+            categoria="equipos_finales", criticidad="baja",
+        ))
+        session.add(sc)
+    session.commit()
+
+    df = devices_consolidados(session)
+    assert len(df) == 1
+    assert df.iloc[0]["Visto"] == 2
+
+
+def test_devices_consolidados_dispositivos_distintos_no_se_mezclan(session):
+    """IPs distintas en el mismo scan producen filas separadas."""
+    from datetime import datetime
+
+    sc = Scan(target="10.0.0.0/24", modo="demo", timestamp=datetime(2026, 6, 1))
+    sc.devices.extend([
+        Device(ip="10.0.0.1", mac="AA:AA:AA:AA:AA:01",
+               device_type="router", ipv6_score=90, ipv6_status="COMPATIBLE",
+               categoria="equipos_red_seguridad", criticidad="alta"),
+        Device(ip="10.0.0.2", mac="BB:BB:BB:BB:BB:02",
+               device_type="server", ipv6_score=60, ipv6_status="PARCIAL",
+               categoria="servidores", criticidad="alta"),
+    ])
+    session.add(sc)
+    session.commit()
+
+    df = devices_consolidados(session)
+    assert len(df) == 2
+
+
+def test_stats_consolidacion_cuenta_scans_y_unicos(session):
+    """stats_consolidacion devuelve n_scans e n_unicos correctos."""
+    from datetime import datetime
+
+    # Dos scans, un dispositivo visto en ambos (mismo ip+mac) y otro solo en el 2º.
+    sc1 = Scan(target="10.0.0.0/24", modo="demo", timestamp=datetime(2026, 6, 1))
+    sc1.devices.append(Device(
+        ip="10.0.0.1", mac="CC:CC:CC:CC:CC:01",
+        device_type="router", ipv6_score=90, ipv6_status="COMPATIBLE",
+        categoria="equipos_red_seguridad", criticidad="alta",
+    ))
+    sc2 = Scan(target="10.0.0.0/24", modo="demo", timestamp=datetime(2026, 6, 2))
+    sc2.devices.extend([
+        Device(ip="10.0.0.1", mac="CC:CC:CC:CC:CC:01",
+               device_type="router", ipv6_score=90, ipv6_status="COMPATIBLE",
+               categoria="equipos_red_seguridad", criticidad="alta"),
+        Device(ip="10.0.0.9", mac="DD:DD:DD:DD:DD:09",
+               device_type="server", ipv6_score=70, ipv6_status="PARCIAL",
+               categoria="servidores", criticidad="alta"),
+    ])
+    session.add_all([sc1, sc2])
+    session.commit()
+
+    stats = stats_consolidacion(session)
+    assert stats["n_scans"] == 2
+    assert stats["n_unicos"] == 2  # rtr (en 2 scans) + server (en 1) = 2 únicos
+
+
 def test_import_all_handles_bad_file(tmp_path, session, monkeypatch):
     """Un archivo corrupto no aborta el import del resto; queda en errores."""
     import src.database.importer as importer_mod

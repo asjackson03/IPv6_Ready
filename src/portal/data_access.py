@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 
 import pandas as pd
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from src.database.db import DB_PATH, SessionLocal
 from src.database.models import (
@@ -19,6 +19,20 @@ from src.database.models import (
     TopologyDevice,
     TopologySession,
 )
+
+
+_MAC_NO_IDENTIFICATIVA = {
+    "desconocido", "unknown", "none", "", "n/a", "00:00:00:00:00:00",
+}
+
+
+def _mac_normalizada(mac: str | None) -> str | None:
+    """Devuelve la MAC en mayúsculas o None si es un valor no identificativo."""
+    if not mac:
+        return None
+    if mac.strip().lower() in _MAC_NO_IDENTIFICATIVA:
+        return None
+    return mac.strip().upper()
 
 
 def db_existe() -> bool:
@@ -151,6 +165,98 @@ def ultimo_roadmap() -> dict | None:
             "contenido_markdown": rm.contenido_markdown,
             "fecha_generacion": rm.fecha_generacion,
         }
+
+
+def devices_consolidados(db_session=None) -> pd.DataFrame:
+    """Vista consolidada: un Device por identidad real (ip + mac normalizada).
+
+    Agrupa todos los Device de todos los Scan. Para cada clave única conserva
+    el estado del Scan más reciente (los scans se procesan en orden ascendente
+    de timestamp, por lo que el último sobrescribe). Añade columnas auxiliares:
+    Visto (cuántos scans distintos lo detectaron), Primera detección, Última detección.
+
+    Args:
+        db_session: sesión SQLAlchemy opcional; si es None usa SessionLocal
+                    (parámetro pensado para los tests, que inyectan su propia BD).
+    """
+    import re
+
+    def _fmt(dt) -> str:
+        return dt.strftime("%Y-%m-%d %H:%M") if dt else "?"
+
+    def _run(s):
+        scans = s.scalars(
+            select(Scan).order_by(Scan.timestamp.asc(), Scan.id.asc())
+        ).all()
+        if not scans:
+            return pd.DataFrame()
+
+        # Clave → {device más reciente, primera_vez, ultima_vez, veces_visto}.
+        # Iteramos en orden ascendente: el último scan siempre sobreescribe (más nuevo gana).
+        grupos: dict = {}
+        for scan in scans:
+            ts = scan.timestamp
+            for d in scan.devices:
+                clave = (d.ip, _mac_normalizada(d.mac))
+                if clave not in grupos:
+                    grupos[clave] = {
+                        "device": d,
+                        "primera_vez": ts,
+                        "ultima_vez": ts,
+                        "veces_visto": 1,
+                    }
+                else:
+                    grupos[clave]["veces_visto"] += 1
+                    grupos[clave]["ultima_vez"] = ts
+                    grupos[clave]["device"] = d
+
+        filas = [
+            {
+                "IP": info["device"].ip,
+                "Hostname": info["device"].hostname,
+                "Tipo": info["device"].device_type,
+                "Vendor": info["device"].vendor,
+                "SO detectado": info["device"].os_detected,
+                "Score IPv6": info["device"].ipv6_score,
+                "Estado IPv6": info["device"].ipv6_status,
+                "Clasificación ML": info["device"].ml_classification,
+                "Confianza ML": info["device"].ml_confidence,
+                "Categoría": info["device"].categoria,
+                "Criticidad": info["device"].criticidad,
+                "Visto": info["veces_visto"],
+                "Primera detección": _fmt(info["primera_vez"]),
+                "Última detección": _fmt(info["ultima_vez"]),
+            }
+            for info in grupos.values()
+        ]
+        filas.sort(
+            key=lambda r: [int(x) for x in re.findall(r"\d+", r["IP"] or "0.0.0.0")]
+        )
+        return pd.DataFrame(filas)
+
+    if db_session is not None:
+        return _run(db_session)
+    with SessionLocal() as s:
+        return _run(s)
+
+
+def stats_consolidacion(db_session=None) -> dict:
+    """Estadísticas globales para el banner del portal.
+
+    Returns:
+        {"n_scans": int, "n_unicos": int}  — scans totales y dispositivos únicos.
+    """
+    def _count_scans(s) -> int:
+        return s.scalar(select(func.count()).select_from(Scan)) or 0
+
+    if db_session is not None:
+        n_scans = _count_scans(db_session)
+    else:
+        with SessionLocal() as s:
+            n_scans = _count_scans(s)
+
+    df = devices_consolidados(db_session)
+    return {"n_scans": n_scans, "n_unicos": len(df)}
 
 
 def resumen_para_chat() -> str:
