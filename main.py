@@ -137,12 +137,92 @@ def build_parser() -> argparse.ArgumentParser:
             "Ollama corriendo."
         ),
     )
+    parser.add_argument(
+        "--init-db",
+        dest="init_db",
+        action="store_true",
+        help=(
+            "Inicializa la base de datos SQLite (Bloque 1) e importa todos los "
+            "scans (data/raw/*.json) y levantamientos de topología "
+            "(data/processed/topology_session_*.json) ya existentes. Muestra "
+            "un resumen de cuántos registros se crearon."
+        ),
+    )
+    parser.add_argument(
+        "--generate-roadmap",
+        dest="generate_roadmap",
+        action="store_true",
+        help=(
+            "Genera un roadmap de migración IPv6 (Módulo 3c) combinando los "
+            "datos de la BD (discovery + topología) con la base de "
+            "conocimiento RAG y el LLM local. Requiere --init-db previo y "
+            "Ollama corriendo. Usa el scan/sesión más recientes si no se "
+            "especifica otro."
+        ),
+    )
     return parser
 
 
 def resolve_formats(fmt: str) -> list[str]:
     """Traduce el argumento --format a la lista esperada por InventoryManager."""
     return ["json", "csv"] if fmt == "both" else [fmt]
+
+
+def run_init_db() -> int:
+    """Inicializa la BD e importa todos los datos existentes (Bloque 1)."""
+    from src.database.db import init_db
+    from src.database.importer import DataImporter
+
+    print(f"{Fore.CYAN}[BLOQUE 1]{Style.RESET_ALL} Inicializando base de datos...")
+    db_path = init_db()
+    print(f"{Fore.GREEN}[OK]{Style.RESET_ALL} Base de datos en: {db_path}")
+
+    importer = DataImporter()
+    try:
+        resumen = importer.import_all_existing_data()
+    finally:
+        importer.close()
+
+    print(f"{Fore.GREEN}[OK]{Style.RESET_ALL} Importación completada:")
+    print(f"  · Scans (Módulo 1):            {resumen['scans']}")
+    print(f"  · Dispositivos:                {resumen['devices']}")
+    print(f"  · Sesiones de topología (3a):  {resumen['topology_sessions']}")
+    print(f"  · Equipos de capa 3:           {resumen['topology_devices']}")
+
+    if resumen["errores"]:
+        print(f"\n{Fore.YELLOW}[AVISO]{Style.RESET_ALL} "
+              f"{len(resumen['errores'])} archivo(s) con error (se omitieron):")
+        for archivo, msg in resumen["errores"]:
+            print(f"  · {archivo}: {msg}")
+
+    return 0
+
+
+def run_generate_roadmap() -> int:
+    """Genera el roadmap de migración desde la BD (Bloque 2, Módulo 3c)."""
+    from src.roadmap.roadmap_generator import RoadmapGenerator
+
+    print(f"{Fore.CYAN}[MÓDULO 3c]{Style.RESET_ALL} Generando roadmap de "
+          f"migración (puede tardar 1-2 minutos con el LLM local)...")
+    generator = RoadmapGenerator()
+    try:
+        roadmap = generator.generate()
+    except RuntimeError as exc:
+        print(f"{Fore.RED}[ERROR]{Style.RESET_ALL} {exc}", file=sys.stderr)
+        return 1
+    finally:
+        generator.close()
+
+    print(f"{Fore.GREEN}[OK]{Style.RESET_ALL} Roadmap generado y guardado en la "
+          f"base de datos (tabla roadmaps).")
+    print(f"\n{Fore.CYAN}{'─' * 60}{Style.RESET_ALL}")
+    # Muestra un preview corto en consola (las primeras líneas).
+    preview = "\n".join(roadmap.contenido_markdown.splitlines()[:25])
+    print(preview)
+    print(f"{Fore.CYAN}{'─' * 60}{Style.RESET_ALL}")
+    print(f"{Style.DIM}(Roadmap completo visible en el portal web — "
+          f"streamlit run src/portal/app.py){Style.RESET_ALL}")
+    return 0
 
 
 def run(args: argparse.Namespace) -> int:
@@ -156,6 +236,15 @@ def run(args: argparse.Namespace) -> int:
         from src.roadmap.topology_session import TopologySession
         TopologySession().run_interactive()
         return 0
+
+    # Bloque 1 — Inicialización e importación a la base de datos. Modo
+    # independiente del discovery: no escanea, solo persiste lo ya generado.
+    if args.init_db:
+        return run_init_db()
+
+    # Bloque 2 — Generación del roadmap (Módulo 3c) desde la BD + RAG + LLM.
+    if args.generate_roadmap:
+        return run_generate_roadmap()
 
     output_dir = args.output or os.getenv("DEFAULT_OUTPUT_DIR", "data/raw/")
     formats = resolve_formats(args.format)

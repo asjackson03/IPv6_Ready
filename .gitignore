@@ -15,6 +15,13 @@ data/processed/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 
+# Base de datos SQLite (regenerable con: python main.py --init-db)
+data/*.db
+
+# Base de conocimiento RAG sintética: SÍ se versiona (es parte del código),
+# se declara aquí explícitamente para que no la atrape data/processed/*.
+!data/sample/knowledge_base/
+
 # Empaquetado
 *.egg-info/
 dist/
