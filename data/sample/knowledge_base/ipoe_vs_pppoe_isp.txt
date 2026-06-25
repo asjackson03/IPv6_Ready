@@ -1,0 +1,29 @@
+IPoE vs PPPoE: implicaciones para el despliegue de IPv6 en ISPs
+
+Los proveedores de servicio de internet (ISP) entregan conectividad a sus
+clientes mediante distintos modelos de acceso, y la elección entre IPoE y PPPoE
+tiene consecuencias directas en cómo se despliega IPv6.
+
+PPPoE (PPP sobre Ethernet) encapsula el tráfico en sesiones punto a punto. Para
+IPv6, PPPoE usa IPv6CP para negociar la sesión y típicamente DHCPv6 Prefix
+Delegation (DHCPv6-PD) para entregar al cliente un prefijo enrutado (por ejemplo
+un /56 o /48). PPPoE ofrece autenticación por sesión y es común en despliegues
+de banda ancha residencial heredados, pero añade sobrecarga (el encabezado PPPoE
+reduce el MTU efectivo a 1492 bytes, lo que con IPv6 obliga a cuidar el path MTU
+discovery y el ajuste de MSS).
+
+IPoE (IP directamente sobre Ethernet, sin PPP) elimina esa capa de
+encapsulación. Para IPv6 suele combinarse con DHCPv6 (incluyendo Prefix
+Delegation) y, opcionalmente, autenticación basada en opción 82 / line-id en el
+equipo de acceso. IPoE simplifica el plano de datos, mantiene el MTU de 1500
+bytes y se adapta mejor a arquitecturas modernas de agregación, por lo que
+muchos ISP que modernizan su red migran de PPPoE a IPoE como parte del mismo
+proyecto en que introducen IPv6.
+
+Para el diagnóstico y el roadmap de un cliente tipo ISP, identificar si el
+acceso es IPoE o PPPoE determina: el mecanismo de delegación de prefijo a usar,
+los ajustes de MTU/MSS necesarios, y si la autenticación de suscriptor debe
+replicarse en el plano IPv6. Esta información no es derivable de un escaneo de
+red ni de un archivo de configuración de un equipo aislado: debe capturarse en
+la conversación con el administrador, junto con cuántos enlaces de upstream
+(multihoming) tiene el ISP.

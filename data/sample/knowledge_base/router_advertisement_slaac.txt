@@ -1,0 +1,32 @@
+Router Advertisement (RA) y SLAAC: buenas prácticas
+
+En IPv6, la autoconfiguración de direcciones sin estado (SLAAC) permite que los
+hosts obtengan una dirección global a partir de los mensajes Router
+Advertisement (RA) que emiten los routers del segmento, sin necesidad de un
+servidor DHCP. Los RA se envían mediante ICMPv6 y anuncian el prefijo de red
+(habitualmente un /64), la puerta de enlace y banderas que indican cómo deben
+configurarse los hosts.
+
+Buenas prácticas al desplegar RA/SLAAC en una migración:
+
+1. Prefijo /64 por segmento. SLAAC requiere un /64 para que la generación de la
+   parte de host (interface identifier) funcione correctamente. Usar prefijos
+   más largos que /64 rompe SLAAC.
+
+2. Decidir el modelo de asignación. Las banderas M (Managed) y O (Other) del RA
+   controlan si los hosts usan SLAAC puro, DHCPv6 con estado, o un híbrido
+   (SLAAC para la dirección + DHCPv6 para DNS). En entornos empresariales que
+   necesitan trazabilidad de qué host tuvo qué dirección, DHCPv6 con estado o el
+   registro de vecinos puede ser preferible a SLAAC puro.
+
+3. Seguridad del primer salto. Un RA malicioso o mal configurado puede
+   secuestrar el tráfico de todo un segmento (ataque "rogue RA"). Se recomienda
+   habilitar RA Guard en los switches de acceso para que solo los puertos donde
+   se esperan routers puedan emitir RA.
+
+4. Coherencia con la topología real. El equipo que emite RA debe ser realmente
+   la capa 3 del segmento. Si en el levantamiento el rol lógico del equipo es
+   "capa 3", es el candidato natural a emisor de RA; si es un firewall que solo
+   hace seguridad, el RA probablemente deba originarse en el switch de core.
+   Por eso conocer el rol lógico real de cada equipo es un insumo directo para
+   planificar dónde se activará SLAAC en el roadmap.

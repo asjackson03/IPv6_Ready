@@ -207,6 +207,10 @@ def run_generate_roadmap() -> int:
     generator = RoadmapGenerator()
     try:
         roadmap = generator.generate()
+        # Se captura el contenido como string AHORA, con la sesión todavía
+        # abierta: tras generator.close() el objeto ORM queda desacoplado y
+        # acceder a sus atributos lanzaría DetachedInstanceError.
+        contenido = roadmap.contenido_markdown
     except RuntimeError as exc:
         print(f"{Fore.RED}[ERROR]{Style.RESET_ALL} {exc}", file=sys.stderr)
         return 1
@@ -217,7 +221,7 @@ def run_generate_roadmap() -> int:
           f"base de datos (tabla roadmaps).")
     print(f"\n{Fore.CYAN}{'─' * 60}{Style.RESET_ALL}")
     # Muestra un preview corto en consola (las primeras líneas).
-    preview = "\n".join(roadmap.contenido_markdown.splitlines()[:25])
+    preview = "\n".join(contenido.splitlines()[:25])
     print(preview)
     print(f"{Fore.CYAN}{'─' * 60}{Style.RESET_ALL}")
     print(f"{Style.DIM}(Roadmap completo visible en el portal web — "

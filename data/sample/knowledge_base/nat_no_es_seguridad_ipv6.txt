@@ -1,0 +1,30 @@
+El mito de "NAT da seguridad" y su relación con IPv6
+
+Una de las barreras psicológicas más extendidas frente a IPv6 es la creencia de
+que NAT (Network Address Translation) proporciona seguridad, y que migrar a IPv6
+—donde cada host puede tener una dirección globalmente enrutable— expone la red.
+Esta creencia confunde dos cosas distintas: traducción de direcciones y filtrado
+de tráfico.
+
+NAT nació como un parche al agotamiento de direcciones IPv4, no como un mecanismo
+de seguridad. El efecto de "ocultamiento" que la gente atribuye a NAT en realidad
+proviene del estado de la tabla de traducción y, sobre todo, de la política
+implícita de "denegar entrante no solicitado" que implementa el dispositivo NAT.
+Esa política de filtrado es lo que aporta protección, y se puede —y se debe—
+implementar igual en IPv6 mediante un firewall con estado (stateful), sin
+necesidad de traducir direcciones.
+
+En IPv6 la postura recomendada es: direccionamiento global de extremo a extremo
+(restaurando el principio original de internet) combinado con un firewall
+perimetral con estado que, por defecto, deniegue el tráfico entrante no
+solicitado y permita solo lo explícitamente autorizado. El resultado de
+seguridad es equivalente o superior al de NAT en IPv4, con la ventaja de eliminar
+la complejidad y la ruptura de aplicaciones que NAT introduce.
+
+Implicación para el diagnóstico y el roadmap: cuando el inventario muestra
+firewalls modernos capaces de IPv6 (por ejemplo FortiGate, Palo Alto o ASA
+recientes), la organización ya tiene el componente clave para una postura de
+seguridad IPv6 sólida. El mensaje para el administrador debe ser explícito:
+perder NAT no significa perder seguridad; significa reemplazar un parche por
+una política de firewall explícita y auditable. Desmontar este mito suele ser
+tan importante para desbloquear la migración como cualquier cambio técnico.

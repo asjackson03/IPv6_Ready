@@ -1,0 +1,27 @@
+Cisco IOS-XE: soporte de IPv6 y dual-stack
+
+Las plataformas modernas que ejecutan Cisco IOS-XE (familias Catalyst 9000,
+ISR 4000, Catalyst 8000) ofrecen soporte maduro de IPv6 en doble pila
+(dual-stack), donde IPv4 e IPv6 coexisten sobre las mismas interfaces sin
+necesidad de túneles ni traducción. Esta es la estrategia de transición
+recomendada para redes empresariales que aún dependen de IPv4: se habilita
+IPv6 de forma incremental sin retirar IPv4, reduciendo el riesgo del despliegue.
+
+Para activar el reenvío IPv6 a nivel global se utiliza "ipv6 unicast-routing".
+En cada interfaz ruteada se asigna una dirección con "ipv6 address", admitiendo
+tanto direcciones global unicast como link-local. IOS-XE soporta los protocolos
+de enrutamiento dinámico habituales en su variante IPv6: OSPFv3, EIGRP para
+IPv6, y BGP con la familia de direcciones IPv6 (address-family ipv6). Un equipo
+que ya ejecuta OSPF o BGP sobre IPv4 normalmente puede habilitar la familia
+IPv6 equivalente sin cambio de hardware.
+
+Buenas prácticas en dual-stack sobre IOS-XE: mantener paridad de políticas
+entre IPv4 e IPv6 (una ACL IPv4 sin su equivalente IPv6 deja un hueco de
+seguridad), habilitar el envío de Router Advertisements en los segmentos donde
+se desee autoconfiguración, y verificar que el MTU sea consistente para evitar
+fragmentación. La ausencia de configuración IPv6 en un equipo IOS-Xe moderno
+casi nunca se debe a una limitación de la plataforma, sino a que simplemente no
+se ha configurado todavía: el soporte está presente y la migración suele ser
+una tarea de configuración, no de reemplazo de hardware. Esto refuerza el
+mensaje central del diagnóstico: la infraestructura suele estar más lista para
+IPv6 de lo que el administrador cree.

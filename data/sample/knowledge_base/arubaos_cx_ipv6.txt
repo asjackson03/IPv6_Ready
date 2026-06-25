@@ -1,0 +1,35 @@
+ArubaOS-CX y switches de acceso/agregación frente a IPv6
+
+Los switches que ejecutan ArubaOS-CX (plataforma moderna de HPE Aruba) y otras
+plataformas de switching contemporáneas (Cisco Catalyst 9000 con IOS-XE, etc.)
+incluyen soporte de IPv6 tanto en el plano de gestión como en el de reenvío. En
+estos equipos, habilitar IPv6 en las VLANs ruteadas y en las interfaces SVI es
+una tarea de configuración, no de hardware.
+
+Puntos relevantes para el diagnóstico de un switch de capa 3 moderno:
+
+1. Gestión IPv6. El propio switch puede gestionarse por IPv6 (SSH, SNMP sobre
+   IPv6), lo que conviene contemplar al planificar para no dejar islas de
+   gestión solo-IPv4.
+
+2. Enrutamiento entre VLANs. Si el switch hace inter-VLAN routing en IPv4
+   (interfaces SVI con dirección IPv4), normalmente puede replicarse en IPv6
+   añadiendo direcciones IPv6 a esas mismas SVI y habilitando el reenvío IPv6.
+   La cantidad de VLANs detectadas en el levantamiento indica cuántos segmentos
+   habrá que direccionar en IPv6.
+
+3. Seguridad del primer salto. Las plataformas modernas ofrecen RA Guard,
+   DHCPv6 Guard y ND inspection para proteger los segmentos de acceso de RA
+   maliciosos y de suplantación de vecinos. Activarlos es parte de las buenas
+   prácticas del despliegue.
+
+4. Verificar licencia y versión. Como en cualquier switch multicapa, conviene
+   confirmar que la versión de software y la licencia activa incluyen las
+   funciones IPv6 necesarias (ver el caso de licenciamiento L3). Un switch de
+   core moderno con licencia adecuada suele clasificarse como "listo" o
+   "actualizable", y rara vez como reemplazo, salvo que una licencia limitante
+   o una versión muy antigua lo impidan.
+
+En conjunto, un switch de core moderno con múltiples VLANs ya ruteadas en IPv4
+es uno de los mejores candidatos para demostrar a la organización que su red
+está más cerca del dual-stack de lo que cree.

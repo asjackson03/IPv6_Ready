@@ -15,6 +15,7 @@ la completa-pero-alucinada en un diagnóstico técnico auditable.
 from __future__ import annotations
 
 import json
+import os
 import re
 
 import httpx
@@ -68,10 +69,13 @@ class OllamaClient:
     def __init__(
         self,
         model: str = "llama3.1:8b",
-        host: str = "http://localhost:11434",
+        host: str | None = None,
     ):
         self.model = model
-        self.host = host
+        # Host configurable por entorno (OLLAMA_HOST) para que el portal en
+        # Docker apunte al servicio 'ollama' de la red de compose. Si no se
+        # define ni se pasa argumento, usa localhost (dev nativo, sin cambios).
+        self.host = host or os.getenv("OLLAMA_HOST", "http://localhost:11434")
         # ollama.Client no abre conexión en el constructor (es perezoso), así
         # que instanciarlo es seguro aunque el servicio esté apagado.
         self._client = ollama.Client(host=host)
@@ -163,6 +167,39 @@ class OllamaClient:
             stream=False,
             options={"temperature": 0.15},
         )
+        return response.get("response", "") if isinstance(response, dict) else ""
+
+    def generate_text(self, prompt: str, temperature: float = 0.2) -> str:
+        """Genera texto LIBRE (no JSON) con el LLM local.
+
+        A diferencia de :meth:`_generate`, no fuerza ``format='json'``: se usa
+        para tareas de redacción como el roadmap (Módulo 3c) o el chat anclado
+        a datos (portal). Mantiene temperatura baja por defecto para favorecer
+        respuestas fieles al contexto sobre creatividad.
+
+        Args:
+            prompt: el prompt completo (incluyendo el contexto de datos reales).
+            temperature: temperatura de muestreo (baja = más determinista).
+
+        Returns:
+            El texto generado por el modelo.
+
+        Raises:
+            RuntimeError: si el servicio Ollama no está accesible, con un
+                mensaje accionable (no se filtra el traceback crudo).
+        """
+        try:
+            response = self._client.generate(
+                model=self.model,
+                prompt=prompt,
+                stream=False,
+                options={"temperature": temperature},
+            )
+        except CONNECTION_ERRORS as exc:
+            raise RuntimeError(
+                f"Servicio Ollama no disponible en {self.host}. Verifica que "
+                f"el contenedor esté corriendo con: docker ps. Detalle: {exc}"
+            ) from exc
         return response.get("response", "") if isinstance(response, dict) else ""
 
     def _build_prompt(

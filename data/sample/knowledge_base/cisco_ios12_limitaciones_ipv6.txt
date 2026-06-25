@@ -1,0 +1,26 @@
+Cisco IOS clásico 12.x: limitaciones de IPv6 y fin de soporte
+
+Los equipos que aún ejecutan versiones antiguas de Cisco IOS de la rama 12.x
+(por ejemplo trenes 12.2 y 12.4) representan uno de los obstáculos más comunes
+para una migración a IPv6. Aunque algunas imágenes 12.x incluían soporte
+parcial de IPv6, ese soporte suele ser incompleto, no recibe actualizaciones de
+seguridad y carece de funciones que hoy se consideran indispensables, como
+implementaciones robustas de OSPFv3, BGP con familia IPv6 o características de
+seguridad del primer salto (RA Guard, DHCPv6 Guard).
+
+El factor decisivo es que muchas plataformas de hardware que solo pueden
+ejecutar IOS 12.x ya alcanzaron su fin de venta y fin de soporte (End of Sale /
+End of Life). En esos casos no existe una imagen de software más reciente que
+instalar: la limitación es del hardware, no solo del sistema operativo. Intentar
+forzar IPv6 sobre estos equipos produce configuraciones frágiles, sin soporte
+del fabricante y difíciles de auditar.
+
+Recomendación práctica para el roadmap de migración: los dispositivos que
+ejecutan IOS 12.x y obtienen una puntuación de compatibilidad IPv6 baja deben
+clasificarse para reemplazo planificado, no para actualización. Conviene
+priorizar su sustitución cuando cumplen un rol crítico (router de borde, switch
+de core, firewall perimetral), y puede tolerarse un reemplazo más gradual cuando
+son equipos de acceso o de baja criticidad. La buena noticia para la
+organización es que el reemplazo de unos pocos equipos legacy suele ser
+suficiente para desbloquear el dual-stack en el resto de la red, que con
+frecuencia ya es capaz de IPv6.

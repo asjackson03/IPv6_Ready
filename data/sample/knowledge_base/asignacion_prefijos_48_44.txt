@@ -1,0 +1,31 @@
+Asignación de prefijos IPv6: /48 vs /44 y multihoming
+
+El plan de direccionamiento es una de las primeras decisiones de una migración a
+IPv6, y el tamaño del prefijo que la organización recibe (o solicita a su RIR,
+como LACNIC en la región) condiciona toda la jerarquía de subredes.
+
+Convenciones generales de tamaño de prefijo:
+
+- Un /64 es la subred básica de IPv6: un segmento de capa 2 / VLAN.
+- Un /56 entrega 256 subredes /64; suele ser suficiente para una sede pequeña o
+  un cliente residencial avanzado.
+- Un /48 entrega 65.536 subredes /64; es la asignación típica para una sede
+  empresarial o un sitio, con holgura para crecer y para una jerarquía limpia
+  (por edificio, por piso, por función).
+- Un /44 agrega 16 prefijos /48; tiene sentido cuando la organización tiene
+  múltiples sitios o sedes y quiere asignar un /48 por sede manteniendo
+  agregación en el borde.
+
+Relación con el multihoming: cuando una organización se conecta a varios ISP
+(multihoming) y desea anunciar su propio espacio de direcciones por BGP, suele
+necesitar direcciones independientes del proveedor (PI) y un ASN. El tamaño del
+bloque PI (frecuentemente un /48 o un /44 según la cantidad de sedes) debe
+elegirse pensando en la agregación: un único prefijo agregable anunciado a todos
+los upstream es preferible a múltiples prefijos dispersos.
+
+Para el roadmap, la cantidad de sedes capturada durante el levantamiento es un
+insumo directo: una organización con una sola sede normalmente planifica sobre
+un /48, mientras que una con varias sedes y multihoming justifica solicitar un
+/44 (o mayor) y diseñar el esquema de subredes por sede desde el principio,
+evitando renumeraciones costosas más adelante. Reservar bits para crecimiento
+futuro es barato en IPv6 y debe hacerse de entrada.

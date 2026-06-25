@@ -1,0 +1,39 @@
+Estrategias de transición a IPv6: dual-stack, NAT64/DNS64 y fases
+
+No existe un único "interruptor" para migrar a IPv6: la transición se hace por
+fases y combinando mecanismos según la realidad de cada red. Las estrategias
+principales son:
+
+1. Dual-stack (recomendada como base). IPv4 e IPv6 conviven en los mismos
+   equipos e interfaces. Es la opción menos disruptiva porque nada de lo que ya
+   funciona en IPv4 se rompe; IPv6 se va habilitando segmento por segmento. La
+   mayoría de redes empresariales con hardware moderno pueden adoptar dual-stack
+   sin reemplazos masivos. Su desventaja es operar dos pilas en paralelo durante
+   un tiempo.
+
+2. NAT64 / DNS64. Permite que clientes solo-IPv6 alcancen servicios que aún solo
+   tienen IPv4. Útil en fases avanzadas, cuando se quiere empezar a ofrecer
+   segmentos solo-IPv6 (por ejemplo redes de invitados o de IoT) sin esperar a
+   que todo el mundo exterior tenga IPv6. Requiere un traductor con estado y un
+   resolver DNS64.
+
+3. Túneles (6in4, 6rd). Mecanismos de encapsulación para atravesar tramos que
+   aún no soportan IPv6 nativo. Hoy se consideran soluciones de transición o de
+   último recurso frente al dual-stack nativo; añaden complejidad y puntos de
+   fallo.
+
+Orden de fases sugerido para un roadmap empresarial:
+
+Fase 0 — Diagnóstico e inventario (lo que produce esta herramienta): saber qué
+equipos están listos, cuáles requieren actualización y cuáles, reemplazo.
+Fase 1 — Direccionamiento y diseño: obtener el prefijo, diseñar el plan de
+subredes por sede/VLAN.
+Fase 2 — Núcleo y borde: habilitar IPv6 en routers de core, switches L3 y
+firewall perimetral, con paridad de políticas de seguridad.
+Fase 3 — Acceso y servicios: extender dual-stack a segmentos de usuario,
+servidores y servicios públicos (DNS, web) con registros AAAA.
+Fase 4 — Optimización: monitoreo, retiro gradual de mecanismos de transición y,
+a largo plazo, evaluación de segmentos solo-IPv6.
+
+Priorizar siempre los equipos críticos (core, servidores, seguridad) sobre los
+de baja criticidad (periféricos, endpoints de alta rotación).

@@ -1,0 +1,26 @@
+Licenciamiento de funciones de capa 3 en switches y su impacto en IPv6
+
+Un hallazgo de campo frecuentemente ignorado en los diagnósticos de migración
+es que muchos switches multicapa requieren una licencia adicional para activar
+funciones de capa 3 (enrutamiento entre VLANs, protocolos de enrutamiento
+dinámico, reenvío IP). Sin esa licencia, el equipo opera solo como switch de
+capa 2, aunque el hardware sea físicamente capaz de enrutar.
+
+El matiz crítico para IPv6 es que el nivel de licencia importa dos veces.
+Primero, puede que la licencia base habilite enrutamiento IPv4 pero no IPv6:
+existen escalones de licenciamiento donde el enrutamiento IPv6, OSPFv3 o las
+características de seguridad del primer salto IPv6 pertenecen a un paquete
+superior. Segundo, en algunos equipos antiguos la licencia que habilita capa 3
+simplemente no contempla IPv6 en absoluto, de modo que pagar por la licencia
+L3 no resuelve la migración.
+
+Esto significa que un diagnóstico basado solo en hardware y sistema operativo
+puede dar un falso positivo: el equipo "podría" enrutar IPv6 según su ficha
+técnica, pero la licencia instalada lo impide. Por eso el levantamiento de
+configuración debe capturar explícitamente las licencias activas y sus
+limitaciones, y no asumir capacidades a partir del modelo. Cuando el
+levantamiento detecta que un switch de core depende de una licencia L3 que no
+soporta IPv6, ese equipo debe marcarse para revisión comercial (adquirir la
+licencia correcta) o para reemplazo, y se convierte en un punto de bloqueo de
+alta prioridad porque suele ser un equipo crítico. Documentar este caso en el
+roadmap evita sorpresas presupuestarias a mitad del proyecto de migración.

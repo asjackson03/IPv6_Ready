@@ -1,0 +1,27 @@
+Fortinet FortiOS: políticas IPv6 y firewall dual-stack
+
+Los firewalls FortiGate con FortiOS soportan IPv6 de forma nativa, pero con una
+particularidad importante para el diagnóstico: las políticas de firewall IPv4 e
+IPv6 son objetos separados. Una política que permite o deniega tráfico IPv4 no
+aplica automáticamente al tráfico IPv6 equivalente. Por eso, al habilitar
+dual-stack en un FortiGate, es necesario crear explícitamente las políticas
+IPv6 (anteriormente configuradas como "config firewall policy6"; en versiones
+unificadas recientes las políticas pueden manejar ambas familias, pero el
+principio de paridad sigue vigente).
+
+El riesgo de seguridad más frecuente al migrar es dejar IPv6 habilitado en las
+interfaces pero sin políticas IPv6 que controlen ese tráfico, o peor, con una
+política IPv6 permisiva de "any/any" creada de forma apresurada para "que
+funcione". Esto abre un camino de tráfico no inspeccionado que no existía en el
+mundo solo-IPv4. El diagnóstico debe verificar que, para cada zona donde hay
+direccionamiento IPv6, exista un conjunto de políticas IPv6 con el mismo nivel
+de control que las IPv4.
+
+FortiOS también soporta SLAAC y DHCPv6 en sus interfaces internas, lo que
+permite al FortiGate actuar como generador de Router Advertisements para los
+segmentos de cliente. En topologías donde el FortiGate es a la vez la capa 3 y
+la seguridad perimetral, conviene revisar el conteo de políticas activas frente
+a las deshabilitadas: una política deshabilitada ("set status disable") sigue
+declarada en la configuración pero no filtra tráfico, y debe contarse como tal
+en el inventario. Para el roadmap, un FortiGate moderno con licencia vigente es
+típicamente un equipo "listo" o "actualizable" para IPv6, rara vez de reemplazo.
